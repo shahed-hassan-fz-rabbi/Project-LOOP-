@@ -1,0 +1,152 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ WORKSPACE ============
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  users    User[]
+  feedback Feedback[]
+  themes   Theme[]
+  reports  Report[]
+
+  @@index([createdAt])
+}
+
+// ============ USER ============
+enum UserRole {
+  ADMIN
+  ANALYST
+  VIEWER
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  passwordHash  String
+  role          UserRole @default(ANALYST)
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  reports Report[]
+
+  @@unique([email, workspaceId])
+  @@index([workspaceId])
+}
+
+// ============ FEEDBACK ============
+enum Sentiment {
+  POS
+  NEU
+  NEG
+}
+
+enum FeedbackStatus {
+  NEW
+  REVIEWED
+  ACTIONED
+}
+
+model Feedback {
+  id            String   @id @default(cuid())
+  content       String   @db.Text
+  channel       String   // "Support Ticket", "App Store Review", etc.
+  sourceRef     String?  // external ID if applicable
+  customerLabel String?
+  
+  sentiment     Sentiment @default(NEU)
+  sentimentScore Float    @default(0) // -1 to 1
+  status        FeedbackStatus @default(NEW)
+  
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  feedbackThemes FeedbackTheme[]
+  embedding      Embedding?
+
+  @@index([workspaceId])
+  @@index([channel])
+  @@index([sentiment])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============ THEME ============
+model Theme {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @db.Text
+  color       String   @default("#3b82f6") // Tailwind blue
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  feedbackThemes FeedbackTheme[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+// ============ FEEDBACK-THEME JOIN TABLE ============
+model FeedbackTheme {
+  feedbackId String
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  themeId String
+  theme   Theme @relation(fields: [themeId], references: [id], onDelete: Cascade)
+
+  confidence Float @default(0.5) // 0 to 1
+
+  @@id([feedbackId, themeId])
+  @@index([feedbackId])
+  @@index([themeId])
+}
+
+// ============ EMBEDDING ============
+model Embedding {
+  id        String   @id @default(cuid())
+  feedbackId String  @unique
+  feedback  Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  
+  // Using a simple text representation for now
+  // In production, use pgvector
+  vector    String   @db.Text // JSON stringified array of floats
+
+  @@index([feedbackId])
+}
+
+// ============ REPORT ============
+model Report {
+  id          String   @id @default(cuid())
+  title       String
+  periodStart DateTime
+  periodEnd   DateTime
+  contentJson String   @db.Text // JSON stringified report content
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  generatedBy String
+  user        User @relation(fields: [generatedBy], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId])
+  @@index([createdAt])
+}
