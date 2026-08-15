@@ -1,32 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { z } from "zod";
+import { classifyFeedbackWithRetry } from "@/lib/ai";
 
 const createFeedbackSchema = z.object({
-  content: z.string().min(10, "Feedback must be at least 10 characters"),
+  content: z.string().min(5, "Feedback must be at least 5 characters"),
   channel: z.string().min(1, "Channel is required"),
   customerLabel: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
 
     if (!session?.user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check RBAC - only ADMIN and ANALYST can create feedback
-    if (!["ADMIN", "ANALYST"].includes(session.user.role)) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
+    const userRole = (session.user as any).role;
+    const workspaceId = (session.user as any).workspaceId;
+
+    if (!["ADMIN", "ANALYST"].includes(userRole)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();
@@ -34,33 +30,77 @@ export async function POST(request: NextRequest) {
 
     if (!validation.success) {
       return NextResponse.json(
-        {
-          error: "Validation failed",
-          details: validation.error.errors,
-        },
+        { error: "Validation failed", details: validation.error.errors },
         { status: 400 }
       );
     }
 
     const { content, channel, customerLabel } = validation.data;
-    const workspaceId = session.user.workspaceId;
 
-    // Create feedback
-    const feedback = await prisma.feedback.create({
+    let feedback = await prisma.feedback.create({
       data: {
         content,
         channel,
         customerLabel: customerLabel || "Anonymous",
         workspaceId,
         status: "NEW",
+        sentiment: "NEU",
+        sentimentScore: 0,
       },
     });
 
+    // Auto-classify with Claude AI
+    try {
+      const existingThemes = await prisma.theme.findMany({
+        where: { workspaceId },
+        select: { name: true },
+      });
+      const existingThemeNames = existingThemes.map((t) => t.name);
+
+      const classification = await classifyFeedbackWithRetry(
+        content,
+        existingThemeNames
+      );
+
+      if (classification) {
+        feedback = await prisma.feedback.update({
+          where: { id: feedback.id },
+          data: {
+            sentiment: classification.sentiment,
+            sentimentScore: classification.sentimentScore,
+          },
+        });
+
+        for (const themeName of classification.themes) {
+          let theme = await prisma.theme.findFirst({
+            where: { workspaceId, name: themeName },
+          });
+
+          if (!theme) {
+            theme = await prisma.theme.create({
+              data: {
+                name: themeName,
+                description: `Auto-generated theme: ${classification.featureArea}`,
+                workspaceId,
+              },
+            });
+          }
+
+          await prisma.feedbackTheme.create({
+            data: {
+              feedbackId: feedback.id,
+              themeId: theme.id,
+              confidence: 0.9,
+            },
+          });
+        }
+      }
+    } catch (classifyError) {
+      console.error("Background AI classification failed:", classifyError);
+    }
+
     return NextResponse.json(
-      {
-        message: "Feedback created successfully",
-        feedback,
-      },
+      { message: "Feedback created successfully", feedback },
       { status: 201 }
     );
   } catch (error: any) {
@@ -72,21 +112,15 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET - List feedback with pagination and filters
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
 
     if (!session?.user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const workspaceId = session.user.workspaceId;
-
-    // Query parameters
+    const workspaceId = (session.user as any).workspaceId;
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get("page") || "1");
     const limit = parseInt(url.searchParams.get("limit") || "10");
@@ -95,37 +129,25 @@ export async function GET(request: NextRequest) {
     const status = url.searchParams.get("status");
     const search = url.searchParams.get("search");
 
-    // Build filters
-    const where: any = {
-      workspaceId, // ✅ CRITICAL: Always scope by workspace
-    };
+    const where: any = { workspaceId };
 
     if (channel) where.channel = channel;
     if (sentiment) where.sentiment = sentiment;
     if (status) where.status = status;
     if (search) {
-      where.content = {
-        contains: search,
-        mode: "insensitive",
-      };
+      where.content = { contains: search, mode: "insensitive" };
     }
 
-    // Count total
     const total = await prisma.feedback.count({ where });
 
-    // Fetch paginated results
     const feedback = await prisma.feedback.findMany({
       where,
       include: {
         feedbackThemes: {
-          include: {
-            theme: true,
-          },
+          include: { theme: true },
         },
       },
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,
       take: limit,
     });
