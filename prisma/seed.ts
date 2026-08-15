@@ -1,5 +1,6 @@
 import { PrismaClient, UserRole, Sentiment, FeedbackStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { generateEmbedding } from "../lib/embeddings";
 
 const prisma = new PrismaClient();
 
@@ -114,34 +115,30 @@ async function main() {
   console.log(`✓ Created workspace: ${workspace.name}`);
 
   // Create users
-  const adminUser = await prisma.user.create({
-    data: {
-      name: "Admin User",
-      email: "admin@demo.com",
-      passwordHash: await bcrypt.hash("admin123", 10),
-      role: UserRole.ADMIN,
-      workspaceId: workspace.id,
-    },
-  });
-
-  const analystUser = await prisma.user.create({
-    data: {
-      name: "Analyst User",
-      email: "analyst@demo.com",
-      passwordHash: await bcrypt.hash("analyst123", 10),
-      role: UserRole.ANALYST,
-      workspaceId: workspace.id,
-    },
-  });
-
-  const viewerUser = await prisma.user.create({
-    data: {
-      name: "Viewer User",
-      email: "viewer@demo.com",
-      passwordHash: await bcrypt.hash("viewer123", 10),
-      role: UserRole.VIEWER,
-      workspaceId: workspace.id,
-    },
+  await prisma.user.createMany({
+    data: [
+      {
+        name: "Admin User",
+        email: "admin@demo.com",
+        passwordHash: await bcrypt.hash("admin123", 10),
+        role: UserRole.ADMIN,
+        workspaceId: workspace.id,
+      },
+      {
+        name: "Analyst User",
+        email: "analyst@demo.com",
+        passwordHash: await bcrypt.hash("analyst123", 10),
+        role: UserRole.ANALYST,
+        workspaceId: workspace.id,
+      },
+      {
+        name: "Viewer User",
+        email: "viewer@demo.com",
+        passwordHash: await bcrypt.hash("viewer123", 10),
+        role: UserRole.VIEWER,
+        workspaceId: workspace.id,
+      },
+    ],
   });
 
   console.log("✓ Created 3 users (Admin, Analyst, Viewer)");
@@ -177,8 +174,7 @@ async function main() {
   const createdFeedback = [];
   for (let i = 0; i < feedbackSamples.length; i++) {
     const sample = feedbackSamples[i];
-    
-    // Add some variation in dates (last 60 days)
+
     const daysAgo = Math.floor(Math.random() * 60);
     const createdAt = new Date();
     createdAt.setDate(createdAt.getDate() - daysAgo);
@@ -203,7 +199,6 @@ async function main() {
       },
     });
 
-    // Assign relevant theme
     const relevantTheme = themes.find((t) =>
       t.name.toLowerCase().includes(sample.topic.toLowerCase())
     );
@@ -213,7 +208,7 @@ async function main() {
         data: {
           feedbackId: feedback.id,
           themeId: relevantTheme.id,
-          confidence: 0.8 + Math.random() * 0.2, // 0.8-1.0
+          confidence: 0.8 + Math.random() * 0.2,
         },
       });
     }
@@ -223,6 +218,23 @@ async function main() {
 
   console.log(`✓ Created ${createdFeedback.length} realistic feedback items`);
 
+  // Generate vector embeddings for all seeded feedback
+  console.log("\n📊 Generating embeddings for semantic search...");
+  for (const feedback of createdFeedback) {
+    try {
+      const embedding = await generateEmbedding(feedback.content);
+      await prisma.embedding.create({
+        data: {
+          feedbackId: feedback.id,
+          vector: JSON.stringify(embedding),
+        },
+      });
+    } catch (err) {
+      console.error(`Failed to embed feedback ID ${feedback.id}`);
+    }
+  }
+
+  console.log("✓ Embeddings generated successfully!");
   console.log("\n✅ Seed completed successfully!");
   console.log("\n📋 Demo Credentials:");
   console.log("   Admin:   admin@demo.com / admin123");

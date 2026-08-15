@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { generateEmbedding } from "@/lib/embeddings";
 
 const simulatedFeedback = [
   { content: "The onboarding flow is very confusing. I gave up after 15 minutes.", channel: "Support Ticket", sentiment: "NEG" },
@@ -23,7 +23,7 @@ const simulatedFeedback = [
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
 
     if (!session?.user) {
       return NextResponse.json(
@@ -32,41 +32,57 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // RBAC check
-    if (!["ADMIN", "ANALYST"].includes(session.user.role)) {
+    const userRole = (session.user as any).role;
+    const workspaceId = (session.user as any).workspaceId;
+
+    if (!["ADMIN", "ANALYST"].includes(userRole)) {
       return NextResponse.json(
         { error: "Forbidden" },
         { status: 403 }
       );
     }
 
-    const workspaceId = session.user.workspaceId;
-
-    // Create simulated feedback items
     let created = 0;
 
     for (const item of simulatedFeedback) {
-      await prisma.feedback.create({
+      const sentimentScore =
+        item.sentiment === "POS"
+          ? 0.7 + Math.random() * 0.3
+          : item.sentiment === "NEG"
+          ? -0.7 - Math.random() * 0.3
+          : Math.random() * 0.4 - 0.2;
+
+      // 1. Create Feedback
+      const feedback = await prisma.feedback.create({
         data: {
           content: item.content,
           channel: item.channel,
           customerLabel: `Customer ${Math.floor(Math.random() * 1000)}`,
           sentiment: item.sentiment as any,
-          sentimentScore:
-            item.sentiment === "POS"
-              ? 0.7 + Math.random() * 0.3
-              : item.sentiment === "NEG"
-              ? -0.7 - Math.random() * 0.3
-              : Math.random() * 0.4 - 0.2,
+          sentimentScore,
           workspaceId,
           status: "NEW",
         },
       });
+
+      // 2. Generate and Store Semantic Embedding
+      try {
+        const embedding = await generateEmbedding(item.content);
+        await prisma.embedding.create({
+          data: {
+            feedbackId: feedback.id,
+            vector: JSON.stringify(embedding),
+          },
+        });
+      } catch (err) {
+        console.error("Embedding generation failed for simulated item:", err);
+      }
+
       created++;
     }
 
     return NextResponse.json({
-      message: "Simulated feedback imported",
+      message: "Simulated feedback imported with embeddings",
       created,
     });
   } catch (error: any) {

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { z } from "zod";
 import { classifyFeedbackWithRetry } from "@/lib/ai";
+import { generateEmbedding } from "@/lib/embeddings";
 
 const createFeedbackSchema = z.object({
   content: z.string().min(5, "Feedback must be at least 5 characters"),
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Auto-classify with Claude AI
+    // 1. Auto-classify with Claude AI
     try {
       const existingThemes = await prisma.theme.findMany({
         where: { workspaceId },
@@ -97,6 +98,20 @@ export async function POST(request: NextRequest) {
       }
     } catch (classifyError) {
       console.error("Background AI classification failed:", classifyError);
+    }
+
+    // 2. Generate Semantic Vector Embedding
+    try {
+      const embedding = await generateEmbedding(content);
+
+      await prisma.embedding.create({
+        data: {
+          feedbackId: feedback.id,
+          vector: JSON.stringify(embedding),
+        },
+      });
+    } catch (embeddingError) {
+      console.error("Embedding generation failed:", embeddingError);
     }
 
     return NextResponse.json(

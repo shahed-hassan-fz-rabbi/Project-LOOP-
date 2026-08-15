@@ -1,49 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { generateEmbedding } from "@/lib/embeddings";
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
 
     if (!session?.user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // RBAC check
-    if (!["ADMIN", "ANALYST"].includes(session.user.role)) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
+    const userRole = (session.user as any).role;
+    const workspaceId = (session.user as any).workspaceId;
+
+    // RBAC Check: Only ADMIN & ANALYST can upload CSV
+    if (!["ADMIN", "ANALYST"].includes(userRole)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const formData = await request.formData();
     const file = formData.get("file") as File;
 
     if (!file) {
-      return NextResponse.json(
-        { error: "No file provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // Read CSV
+    // Read CSV content
     const text = await file.text();
     const lines = text.split("\n");
 
     if (lines.length < 2) {
-      return NextResponse.json(
-        { error: "CSV file is empty" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "CSV file is empty" }, { status: 400 });
     }
 
-    // Parse header
+    // Parse header row
     const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
     const contentIndex = header.indexOf("content");
     const channelIndex = header.indexOf("channel");
@@ -56,14 +47,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse rows
-    const workspaceId = session.user.workspaceId;
     let imported = 0;
     let failed = 0;
     const errors: any[] = [];
 
+    // Parse data rows
     for (let i = 1; i < lines.length; i++) {
-      if (!lines[i].trim()) continue; // Skip empty lines
+      if (!lines[i].trim()) continue;
 
       try {
         const values = lines[i].split(",").map((v) => v.trim());
@@ -71,9 +61,7 @@ export async function POST(request: NextRequest) {
         const content = values[contentIndex];
         const channel = values[channelIndex];
         const customerLabel =
-          customerLabelIndex >= 0
-            ? values[customerLabelIndex]
-            : "Anonymous";
+          customerLabelIndex >= 0 ? values[customerLabelIndex] : "Anonymous";
 
         if (!content || !channel) {
           failed++;
@@ -84,16 +72,31 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Create feedback
-        await prisma.feedback.create({
+        // 1. Create feedback record
+        const feedback = await prisma.feedback.create({
           data: {
             content,
             channel,
             customerLabel: customerLabel || "Anonymous",
             workspaceId,
             status: "NEW",
+            sentiment: "NEU",
+            sentimentScore: 0,
           },
         });
+
+        // 2. Generate vector embedding
+        try {
+          const embedding = await generateEmbedding(content);
+          await prisma.embedding.create({
+            data: {
+              feedbackId: feedback.id,
+              vector: JSON.stringify(embedding),
+            },
+          });
+        } catch (embedErr) {
+          console.error(`Embedding generation failed for row ${i + 1}`);
+        }
 
         imported++;
       } catch (err: any) {
@@ -109,7 +112,7 @@ export async function POST(request: NextRequest) {
       message: "CSV import completed",
       imported,
       failed,
-      errors: errors.slice(0, 10), // Return first 10 errors
+      errors: errors.slice(0, 10),
     });
   } catch (error: any) {
     console.error("CSV upload error:", error);
