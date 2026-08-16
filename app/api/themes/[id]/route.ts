@@ -2,13 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
-
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
   try {
     const session = await auth();
 
@@ -16,10 +13,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const { id } = await context.params;
     const workspaceId = (session.user as any).workspaceId;
 
     const theme = await prisma.theme.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         feedbackThemes: {
           include: {
@@ -33,7 +31,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Theme not found" }, { status: 404 });
     }
 
-    // Tenant isolation
     if (theme.workspaceId !== workspaceId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -84,7 +81,44 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       timeline: timelineData,
     });
   } catch (error: any) {
-    console.error("Get theme drilldown error:", error);
+    console.error("Get theme error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if ((session.user as any).role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { id } = await context.params;
+    const workspaceId = (session.user as any).workspaceId;
+
+    const theme = await prisma.theme.findUnique({
+      where: { id },
+    });
+
+    if (!theme || theme.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Theme not found" }, { status: 404 });
+    }
+
+    await prisma.theme.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ message: "Theme deleted" });
+  } catch (error: any) {
+    console.error("Delete theme error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -1,77 +1,125 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { z } from "zod";
+import { classifyFeedbackWithRetry } from "@/lib/ai";
+import { generateEmbedding } from "@/lib/embeddings";
 
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
+const createFeedbackSchema = z.object({
+  content: z.string().min(5, "Feedback must be at least 5 characters"),
+  channel: z.string().min(1, "Channel is required"),
+  customerLabel: z.string().optional(),
+});
 
-// Update feedback status
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
 
     if (!session?.user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userRole = (session.user as any).role;
+    const workspaceId = (session.user as any).workspaceId;
+
+    if (!["ADMIN", "ANALYST"].includes(userRole)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();
-    const { status } = body;
+    const validation = createFeedbackSchema.safeParse(body);
 
-    // Validate status
-    if (!["NEW", "REVIEWED", "ACTIONED"].includes(status)) {
+    if (!validation.success) {
       return NextResponse.json(
-        { error: "Invalid status" },
+        { error: "Validation failed", details: validation.error.issues },
         { status: 400 }
       );
     }
 
-    // Check if feedback belongs to user's workspace
-    const feedback = await prisma.feedback.findUnique({
-      where: { id: params.id },
+    const { content, channel, customerLabel } = validation.data;
+
+    let feedback = await prisma.feedback.create({
+      data: {
+        content,
+        channel,
+        customerLabel: customerLabel || "Anonymous",
+        workspaceId,
+        status: "NEW",
+        sentiment: "NEU",
+        sentimentScore: 0,
+      },
     });
 
-    if (!feedback) {
-      return NextResponse.json(
-        { error: "Feedback not found" },
-        { status: 404 }
+    // 1. Auto-classify with Claude AI
+    try {
+      const existingThemes = await prisma.theme.findMany({
+        where: { workspaceId },
+        select: { name: true },
+      });
+      const existingThemeNames = existingThemes.map((t) => t.name);
+
+      const classification = await classifyFeedbackWithRetry(
+        content,
+        existingThemeNames
       );
+
+      if (classification) {
+        feedback = await prisma.feedback.update({
+          where: { id: feedback.id },
+          data: {
+            sentiment: classification.sentiment,
+            sentimentScore: classification.sentimentScore,
+          },
+        });
+
+        for (const themeName of classification.themes) {
+          let theme = await prisma.theme.findFirst({
+            where: { workspaceId, name: themeName },
+          });
+
+          if (!theme) {
+            theme = await prisma.theme.create({
+              data: {
+                name: themeName,
+                description: `Auto-generated theme: ${classification.featureArea}`,
+                workspaceId,
+              },
+            });
+          }
+
+          await prisma.feedbackTheme.create({
+            data: {
+              feedbackId: feedback.id,
+              themeId: theme.id,
+              confidence: 0.9,
+            },
+          });
+        }
+      }
+    } catch (classifyError) {
+      console.error("Background AI classification failed:", classifyError);
     }
 
-    // ✅ CRITICAL: Tenant isolation check
-    if (feedback.workspaceId !== session.user.workspaceId) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
+    // 2. Generate Semantic Vector Embedding
+    try {
+      const embedding = await generateEmbedding(content);
+
+      await prisma.embedding.create({
+        data: {
+          feedbackId: feedback.id,
+          vector: JSON.stringify(embedding),
+        },
+      });
+    } catch (embeddingError) {
+      console.error("Embedding generation failed:", embeddingError);
     }
 
-    // Check RBAC
-    if (!["ADMIN", "ANALYST"].includes(session.user.role)) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
-    }
-
-    // Update
-    const updated = await prisma.feedback.update({
-      where: { id: params.id },
-      data: { status },
-    });
-
-    return NextResponse.json({
-      message: "Feedback updated",
-      feedback: updated,
-    });
+    return NextResponse.json(
+      { message: "Feedback created successfully", feedback },
+      { status: 201 }
+    );
   } catch (error: any) {
-    console.error("Update feedback error:", error);
+    console.error("Create feedback error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -79,53 +127,57 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// Delete feedback
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
 
     if (!session?.user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (session.user.role !== "ADMIN") {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
+    const workspaceId = (session.user as any).workspaceId;
+    const url = new URL(request.url);
+    const page = parseInt(url.searchParams.get("page") || "1");
+    const limit = parseInt(url.searchParams.get("limit") || "10");
+    const channel = url.searchParams.get("channel");
+    const sentiment = url.searchParams.get("sentiment");
+    const status = url.searchParams.get("status");
+    const search = url.searchParams.get("search");
+
+    const where: any = { workspaceId };
+
+    if (channel) where.channel = channel;
+    if (sentiment) where.sentiment = sentiment;
+    if (status) where.status = status;
+    if (search) {
+      where.content = { contains: search, mode: "insensitive" };
     }
 
-    const feedback = await prisma.feedback.findUnique({
-      where: { id: params.id },
-    });
+    const total = await prisma.feedback.count({ where });
 
-    if (!feedback) {
-      return NextResponse.json(
-        { error: "Feedback not found" },
-        { status: 404 }
-      );
-    }
-
-    // ✅ Tenant isolation
-    if (feedback.workspaceId !== session.user.workspaceId) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
-    }
-
-    await prisma.feedback.delete({
-      where: { id: params.id },
+    const feedback = await prisma.feedback.findMany({
+      where,
+      include: {
+        feedbackThemes: {
+          include: { theme: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
     });
 
     return NextResponse.json({
-      message: "Feedback deleted",
+      feedback,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error: any) {
-    console.error("Delete feedback error:", error);
+    console.error("List feedback error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
