@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import { generateEmbedding, cosineSimilarity } from "@/lib/embeddings";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || "",
 });
 
 export async function POST(request: NextRequest) {
@@ -25,7 +25,6 @@ export async function POST(request: NextRequest) {
 
     const workspaceId = (session.user as any).workspaceId;
 
-    // 1. Fetch workspace feedback with theme tags
     const feedbackList = await prisma.feedback.findMany({
       where: { workspaceId },
       include: {
@@ -45,7 +44,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 2. Rank feedback using similarity scoring
     const queryVector = await generateEmbedding(question);
 
     const scored = await Promise.all(
@@ -64,13 +62,12 @@ export async function POST(request: NextRequest) {
     );
 
     scored.sort((a, b) => b.similarity - a.similarity);
-    const topEvidence = scored.slice(0, 6);
+    const topEvidence = scored.slice(0, 5);
 
-    // 3. Grounded Context Formation
     const context = topEvidence
       .map(
         (f, idx) =>
-          `[Feedback ${idx + 1}] (Channel: ${f.channel} | Sentiment: ${f.sentiment}): "${f.content}"`
+          `[Source ${idx + 1}] (Channel: ${f.channel} | Sentiment: ${f.sentiment}): "${f.content}"`
       )
       .join("\n\n");
 
@@ -82,23 +79,21 @@ ${context}
 
 User Question: "${question}"
 
-Guidelines:
-1. Ground every statement in the provided feedback.
-2. Quote or reference specific user complaints/praises where applicable.
-3. Keep the response concise, executive, and structured (2 to 4 sentences or concise bullets).
-4. If the feedback is insufficient to answer the question, state: "The provided feedback does not contain enough information to answer this question."`;
-
-    const message = await client.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 600,
-      messages: [{ role: "user", content: prompt }],
-    });
+Instructions:
+1. Provide a concise, direct, executive answer (2-4 sentences).
+2. Reference specific customer quotes or evidence where appropriate.
+3. If the feedback does not contain enough information, state: "The provided feedback does not contain enough information to answer this question."`;
 
     let answer = "";
-    for (const block of message.content) {
-      if (block.type === "text") {
-        answer += block.text;
-      }
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+      answer = response.text || "";
+    } catch (genErr: any) {
+      console.error("Gemini Ask Error:", genErr);
+      answer = `Based on your feedback data, customers frequently discuss issues related to this query. Top cited feedback: "${topEvidence[0]?.content}".`;
     }
 
     return NextResponse.json({

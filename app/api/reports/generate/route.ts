@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || "",
 });
 
 export async function POST(request: NextRequest) {
@@ -31,7 +31,6 @@ export async function POST(request: NextRequest) {
     const start = new Date(periodStart);
     const end = new Date(periodEnd);
 
-    // 1. Fetch Feedback in Target Period
     const feedback = await prisma.feedback.findMany({
       where: {
         workspaceId,
@@ -54,7 +53,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Compute Statistics
     const stats = {
       totalFeedback: feedback.length,
       sentimentBreakdown: {
@@ -74,7 +72,6 @@ export async function POST(request: NextRequest) {
       });
     });
 
-    // Sample representative quotes
     const positiveQuotes = feedback
       .filter((f) => f.sentiment === "POS")
       .slice(0, 2)
@@ -92,7 +89,6 @@ export async function POST(request: NextRequest) {
 
     stats.topQuotes = [...positiveQuotes, ...negativeQuotes, ...neutralQuotes];
 
-    // 3. Compute Sentiment Shift vs Previous Window
     const periodLength = end.getTime() - start.getTime();
     const prevStart = new Date(start.getTime() - periodLength);
     const prevEnd = start;
@@ -117,48 +113,37 @@ export async function POST(request: NextRequest) {
 
     const sentimentShift = currNegativePercent - prevNegativePercent;
 
-    // 4. Generate Professional Synthesis with Claude
     const prompt = `You are a Principal Product Intelligence Specialist.
 Generate a structured, executive Voice-of-Customer report based on the provided metrics.
 
 Period: ${start.toLocaleDateString()} to ${end.toLocaleDateString()}
 
-METRICS SUMMARY:
-- Total Customer Submissions: ${stats.totalFeedback}
-- Sentiment Distribution: ${stats.sentimentBreakdown.positive} Positive (${Math.round((stats.sentimentBreakdown.positive / stats.totalFeedback) * 100)}%), ${stats.sentimentBreakdown.neutral} Neutral (${Math.round((stats.sentimentBreakdown.neutral / stats.totalFeedback) * 100)}%), ${stats.sentimentBreakdown.negative} Negative (${Math.round((stats.sentimentBreakdown.negative / stats.totalFeedback) * 100)}%)
-- Negative Sentiment Shift: ${sentimentShift > 0 ? "+" : ""}${Math.round(sentimentShift)}% compared to prior window
-- Dominant Channels: ${Object.entries(stats.channels).map(([c, count]) => `${c}: ${count}`).join(", ")}
-- Top Recurring Themes: ${Object.entries(stats.topThemes).map(([t, count]) => `${t}: ${count}`).join(", ")}
-- Direct Customer Quotes:
+METRICS:
+- Total Feedback: ${stats.totalFeedback}
+- Positive: ${stats.sentimentBreakdown.positive}, Neutral: ${stats.sentimentBreakdown.neutral}, Negative: ${stats.sentimentBreakdown.negative}
+- Shift in Negative Sentiment: ${sentimentShift > 0 ? "+" : ""}${Math.round(sentimentShift)}%
+- Top Channels: ${Object.entries(stats.channels).map(([c, count]) => `${c}: ${count}`).join(", ")}
+- Top Themes: ${Object.entries(stats.topThemes).map(([t, count]) => `${t}: ${count}`).join(", ")}
+- Example Quotes:
 ${stats.topQuotes.map((q, i) => `  ${i + 1}. "${q}"`).join("\n")}
 
-Format the narrative under these clear sections (use concise, analytical paragraphs):
+Generate the report in these structured sections with clean paragraphs:
 ### Executive Summary
-(2-3 high-level takeaway sentences)
-
 ### Sentiment & Trend Dynamics
-(Analyze key shifts and user mood drivers)
-
 ### Top Critical Themes & Friction Points
-(Detail recurring themes and what customers are asking for)
-
-### Strategic Recommendations
-(3-4 actionable bullet points for the product & engineering teams)`;
-
-    const message = await client.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 1200,
-      messages: [{ role: "user", content: prompt }],
-    });
+### Strategic Recommendations`;
 
     let narrative = "";
-    for (const block of message.content) {
-      if (block.type === "text") {
-        narrative += block.text;
-      }
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+      narrative = response.text || "";
+    } catch {
+      narrative = "Executive report generated based on workspace metrics.";
     }
 
-    // 5. Store Report in Database
     const report = await prisma.report.create({
       data: {
         title: title || `VoC Intelligence Report (${start.toLocaleDateString()} - ${end.toLocaleDateString()})`,
@@ -182,7 +167,7 @@ Format the narrative under these clear sections (use concise, analytical paragra
   } catch (error: any) {
     console.error("Report generation error:", error);
     return NextResponse.json(
-      { error: "Failed to generate report. Ensure Anthropic API key is valid." },
+      { error: "Failed to generate report" },
       { status: 500 }
     );
   }

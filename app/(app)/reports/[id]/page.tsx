@@ -71,8 +71,8 @@ export default function ReportDetailPage() {
   const maxChannelCount = Math.max(...Object.values(content.statistics.channels || {}), 1);
 
   return (
-    <div className="p-8 max-w-5xl mx-auto bg-slate-50 min-h-screen">
-      {/* Action Header */}
+    <div className="p-8 max-w-5xl mx-auto bg-slate-50 min-h-screen print:p-0 print:m-0 print:max-w-full print:bg-white">
+      {/* Action Header - Hidden on Print */}
       <div className="flex items-center justify-between mb-6 print:hidden">
         <button
           onClick={() => router.push("/reports")}
@@ -89,9 +89,9 @@ export default function ReportDetailPage() {
       </div>
 
       {/* Main Report Card */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 mb-8">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 mb-8 print:border-none print:shadow-none print:p-0 print:mb-6">
         <div className="border-b border-slate-100 pb-6 mb-6">
-          <span className="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded">
+          <span className="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded print:border print:border-blue-200">
             Voice of Customer Report
           </span>
           <h1 className="text-3xl font-bold text-slate-900 mt-3">{report.title}</h1>
@@ -101,7 +101,7 @@ export default function ReportDetailPage() {
         </div>
 
         {/* Top KPI Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100 mb-8 print:bg-slate-50 print:border print:border-slate-200">
           <div>
             <p className="text-xs text-slate-500 uppercase font-semibold">Total Submissions</p>
             <p className="text-2xl font-bold text-slate-900 mt-1">{content.statistics.totalFeedback}</p>
@@ -128,19 +128,17 @@ export default function ReportDetailPage() {
         </div>
 
         {/* AI Narrative Section */}
-        <div className="prose prose-slate max-w-none space-y-4">
+        <div className="prose prose-slate max-w-none space-y-4 text-sm leading-relaxed text-slate-800">
           {content.narrative.split("\n\n").map((paragraph, idx) => (
-            <p key={idx} className="text-slate-800 leading-relaxed text-sm">
-              {paragraph}
-            </p>
+            <p key={idx}>{paragraph}</p>
           ))}
         </div>
       </div>
 
       {/* Breakdown Grids */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 print:grid-cols-2">
         {/* Top Themes */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 print:border print:border-slate-200">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 mb-4">Top Feedback Themes</h2>
           <div className="space-y-3">
             {Object.entries(content.statistics.topThemes)
@@ -164,7 +162,7 @@ export default function ReportDetailPage() {
         </div>
 
         {/* Channel Ingestion Breakdown */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 print:border print:border-slate-200">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 mb-4">Feedback Channels</h2>
           <div className="space-y-3">
             {Object.entries(content.statistics.channels)
@@ -189,11 +187,11 @@ export default function ReportDetailPage() {
 
       {/* Notable Quotes */}
       {content.statistics.topQuotes && content.statistics.topQuotes.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8 print:border print:border-slate-200">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 mb-4 flex items-center gap-2">
             <MessageSquareQuote className="h-4 w-4 text-blue-600" /> Grounded Customer Voice Quotes
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 print:grid-cols-2">
             {content.statistics.topQuotes.map((quote, idx) => (
               <div key={idx} className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-xs italic text-slate-700">
                 "{quote}"
@@ -202,6 +200,28 @@ export default function ReportDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Global CSS to completely remove sidebar during print */}
+      <style jsx global>{`
+        @media print {
+          @page {
+            margin: 1.2cm;
+          }
+          body {
+            background: #ffffff !important;
+            color: #0f172a !important;
+          }
+          aside, nav, header, .print\\:hidden {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            height: 0 !important;
+          }
+          main, div {
+            overflow: visible !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }

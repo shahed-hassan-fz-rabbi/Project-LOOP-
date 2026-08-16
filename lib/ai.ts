@@ -1,7 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "dummy-key",
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || "",
 });
 
 export interface ClassificationResult {
@@ -16,16 +16,12 @@ export async function classifyFeedback(
   existingThemes: string[] = []
 ): Promise<ClassificationResult | null> {
   try {
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === "dummy-key") {
-      throw new Error("Missing ANTHROPIC_API_KEY");
-    }
-
-    const prompt = `You are a customer feedback classifier. Analyze this feedback and output JSON only.
+    const prompt = `You are a customer feedback classifier. Analyze this feedback and output strict JSON only.
 
 Feedback: "${content}"
 Existing Themes in Workspace: ${JSON.stringify(existingThemes)}
 
-Output Format (strict JSON only):
+Output JSON Format:
 {
   "sentiment": "POS" | "NEU" | "NEG",
   "sentimentScore": <number between -1.0 and 1.0>,
@@ -33,24 +29,21 @@ Output Format (strict JSON only):
   "featureArea": "Short area name"
 }`;
 
-    const response = await client.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 300,
-      messages: [{ role: "user", content: prompt }],
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
     });
 
-    const responseText =
-      response.content[0].type === "text" ? response.content[0].text : "{}";
-    
-    const parsed = JSON.parse(responseText.trim());
-    return parsed;
+    const text = response.text || "{}";
+    return JSON.parse(text.trim());
   } catch (error: any) {
-    console.error("AI Classification Error (Using Rule-based Fallback):", error.message);
-    
-    // Rule-based Fallback when API key is unauthenticated
+    console.error("Gemini Classification Error:", error.message);
     const lower = content.toLowerCase();
-    const isNeg = lower.includes("slow") || lower.includes("bug") || lower.includes("crash") || lower.includes("confusing") || lower.includes("fail") || lower.includes("bad");
-    const isPos = lower.includes("love") || lower.includes("great") || lower.includes("fast") || lower.includes("awesome") || lower.includes("good") || lower.includes("helped");
+    const isNeg = lower.includes("slow") || lower.includes("bug") || lower.includes("crash") || lower.includes("confusing");
+    const isPos = lower.includes("love") || lower.includes("great") || lower.includes("fast") || lower.includes("awesome");
 
     return {
       sentiment: isNeg ? "NEG" : isPos ? "POS" : "NEU",
