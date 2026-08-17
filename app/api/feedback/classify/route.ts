@@ -8,14 +8,20 @@ export async function POST(request: NextRequest) {
     const session = await auth();
 
     if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
     const role = (session.user as any).role;
     const workspaceId = (session.user as any).workspaceId;
 
     if (!["ADMIN", "ANALYST"].includes(role)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      );
     }
 
     const body = await request.json();
@@ -34,17 +40,20 @@ export async function POST(request: NextRequest) {
 
     if (!feedback || feedback.workspaceId !== workspaceId) {
       return NextResponse.json(
-        { error: "Feedback not found" },
+        { error: "Feedback not found or forbidden" },
         { status: 404 }
       );
     }
 
+    // Get existing themes
     const existingThemes = await prisma.theme.findMany({
       where: { workspaceId },
       select: { name: true },
     });
+
     const themeNames = existingThemes.map((t) => t.name);
 
+    // Classify
     const classification = await classifyFeedbackWithRetry(
       feedback.content,
       themeNames
@@ -52,11 +61,12 @@ export async function POST(request: NextRequest) {
 
     if (!classification) {
       return NextResponse.json(
-        { error: "Failed to classify feedback" },
+        { error: "Failed to classify feedback after retries" },
         { status: 500 }
       );
     }
 
+    // Update feedback
     const updatedFeedback = await prisma.feedback.update({
       where: { id: feedbackId },
       data: {
@@ -65,10 +75,12 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Remove old theme assignments
     await prisma.feedbackTheme.deleteMany({
       where: { feedbackId },
     });
 
+    // Assign new themes
     for (const themeName of classification.themes) {
       let theme = await prisma.theme.findFirst({
         where: { workspaceId, name: themeName },
@@ -78,7 +90,7 @@ export async function POST(request: NextRequest) {
         theme = await prisma.theme.create({
           data: {
             name: themeName,
-            description: `Auto-generated theme: ${classification.featureArea}`,
+            description: `Auto-generated: ${classification.featureArea}`,
             workspaceId,
           },
         });
@@ -99,7 +111,7 @@ export async function POST(request: NextRequest) {
       classification,
     });
   } catch (error: any) {
-    console.error("Classify single feedback error:", error);
+    console.error("Classification error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
