@@ -6,7 +6,7 @@ import Providers from "@/components/providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "LOOP — AI Customer Feedback Intelligence",
+  title: "LOOP AI Customer Feedback Intelligence",
   description: "Transform multi-channel customer feedback into prioritized product decisions.",
 };
 
