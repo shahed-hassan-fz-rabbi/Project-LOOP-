@@ -11,43 +11,54 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const role = (session.user as any).role;
     const workspaceId = (session.user as any).workspaceId;
+
+    if (!["ADMIN", "ANALYST"].includes(role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const body = await request.json();
     const { feedbackId } = body;
 
     if (!feedbackId) {
-      return NextResponse.json({ error: "feedbackId is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "feedbackId is required" },
+        { status: 400 }
+      );
     }
 
     const feedback = await prisma.feedback.findUnique({
       where: { id: feedbackId },
     });
 
-    if (!feedback) {
-      return NextResponse.json({ error: "Feedback not found" }, { status: 404 });
-    }
-
-    // Tenant isolation
-    if (feedback.workspaceId !== workspaceId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!feedback || feedback.workspaceId !== workspaceId) {
+      return NextResponse.json(
+        { error: "Feedback not found" },
+        { status: 404 }
+      );
     }
 
     const existingThemes = await prisma.theme.findMany({
       where: { workspaceId },
       select: { name: true },
     });
-    const existingThemeNames = existingThemes.map((t) => t.name);
+    const themeNames = existingThemes.map((t) => t.name);
 
     const classification = await classifyFeedbackWithRetry(
       feedback.content,
-      existingThemeNames
+      themeNames
     );
 
     if (!classification) {
-      return NextResponse.json({ error: "Classification failed" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to classify feedback" },
+        { status: 500 }
+      );
     }
 
-    const updated = await prisma.feedback.update({
+    // Update sentiment
+    const updatedFeedback = await prisma.feedback.update({
       where: { id: feedbackId },
       data: {
         sentiment: classification.sentiment,
@@ -55,7 +66,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Reset old theme mappings
+    // Remove existing themes and assign new ones
     await prisma.feedbackTheme.deleteMany({
       where: { feedbackId },
     });
@@ -69,7 +80,7 @@ export async function POST(request: NextRequest) {
         theme = await prisma.theme.create({
           data: {
             name: themeName,
-            description: `Auto-generated: ${classification.rationale}`,
+            description: `Auto-generated theme: ${classification.featureArea}`,
             workspaceId,
           },
         });
@@ -86,11 +97,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       message: "Feedback classified successfully",
-      feedback: updated,
+      feedback: updatedFeedback,
       classification,
     });
   } catch (error: any) {
-    console.error("Classify route error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("Classify single feedback error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }

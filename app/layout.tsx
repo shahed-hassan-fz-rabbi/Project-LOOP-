@@ -1,25 +1,26 @@
-import "./globals.css";
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import Providers from "@/components/providers";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import Sidebar from "@/components/sidebar";
 
-const inter = Inter({ subsets: ["latin"] });
-
-export const metadata: Metadata = {
-  title: "LOOP — AI Customer Feedback Intelligence",
-  description: "Transform multi-channel customer feedback into prioritized product decisions.",
-};
-
-export default function RootLayout({
+export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await auth();
+
+  if (!session) {
+    redirect("/login");
+  }
+
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <Providers>{children}</Providers>
-      </body>
-    </html>
+    <div className="flex h-screen overflow-hidden bg-slate-50 print:h-auto print:overflow-visible print:bg-white">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto print:overflow-visible print:w-full print:block">
+        <main className="flex-1 print:p-0">
+          {children}
+        </main>
+      </div>
+    </div>
   );
 }
