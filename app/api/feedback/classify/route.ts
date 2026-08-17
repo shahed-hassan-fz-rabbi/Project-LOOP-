@@ -57,7 +57,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update sentiment
     const updatedFeedback = await prisma.feedback.update({
       where: { id: feedbackId },
       data: {
@@ -66,7 +65,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Remove existing themes and assign new ones
     await prisma.feedbackTheme.deleteMany({
       where: { feedbackId },
     });

@@ -1,7 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/sidebar";
-import Providers from "@/components/providers";
 
 export default async function AppLayout({
   children,
@@ -10,18 +9,16 @@ export default async function AppLayout({
 }) {
   const session = await auth();
 
-  if (!session?.user) {
+  if (!session) {
     redirect("/login");
   }
 
   return (
-    <Providers session={session}>
-      <div className="flex h-screen">
-        <Sidebar />
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 overflow-auto bg-gray-50">{children}</div>
-        </div>
+    <div className="flex h-screen overflow-hidden bg-slate-50 print:h-auto print:overflow-visible print:bg-white">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto print:overflow-visible print:w-full print:block">
+        <main className="flex-1 print:p-0">{children}</main>
       </div>
-    </Providers>
+    </div>
   );
 }
