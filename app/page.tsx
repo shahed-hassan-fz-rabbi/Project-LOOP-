@@ -3,8 +3,8 @@
 import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import Navbar from "@/components/navbar";
-import Footer from "@/components/footer";
+import Navbar from "../components/navbar";
+import Footer from "../components/footer";
 import {
   ArrowRight,
   Sparkles,
