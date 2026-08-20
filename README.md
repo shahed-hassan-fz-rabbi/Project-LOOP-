@@ -97,6 +97,21 @@ The seeded demo environment includes pre-configured credentials across organizat
 * PostgreSQL Database Instance (Local or Neon/Supabase)
 * Git
 
+---
+
+## 📸 Application Screenshots
+
+### 1. Executive Dashboard
+![Dashboard](public/docs/screenshots/dashboard.png)
+
+### 2. Triage Inbox & Filters
+![Inbox](public/docs/screenshots/inbox.png)
+
+### 3. Ask LOOP AI (RAG Interface)
+![Ask LOOP](public/docs/screenshots/ask-loop.png)
+
+---
+
 ### Installation Steps
 
 #### 1. Clone the Repository
