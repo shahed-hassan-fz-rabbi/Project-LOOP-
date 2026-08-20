@@ -9,8 +9,8 @@ import { ArrowLeft, Lock, Mail, AlertCircle, ArrowRight, ShieldCheck } from "luc
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@demo.com");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -37,12 +37,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemoCredentials = (roleEmail: string) => {
-    setEmail(roleEmail);
-    setPassword("password123");
-    setError("");
   };
 
   return (
@@ -169,51 +163,26 @@ export default function LoginPage() {
             </Link>
           </div>
 
-          <div className="pt-4 border-t border-slate-100 space-y-2.5">
-            <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-800">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Demo Credentials (Click to fill)</span>
+          {/* Professional Sandbox Evaluation Note */}
+          <div className="pt-4 border-t border-slate-100 space-y-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+              <span>Evaluation Workspace Accounts</span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => fillDemoCredentials("admin@demo.com")}
-                className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  email === "admin@demo.com"
-                    ? "border-sky-300 bg-sky-50/60"
-                    : "border-slate-100 bg-slate-50 hover:bg-slate-100/70"
-                }`}
-              >
-                <span className="block text-[10px] font-bold text-slate-800">Admin</span>
-                <span className="block text-[9px] text-slate-400 truncate">admin@demo.com</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillDemoCredentials("analyst@demo.com")}
-                className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  email === "analyst@demo.com"
-                    ? "border-sky-300 bg-sky-50/60"
-                    : "border-slate-100 bg-slate-50 hover:bg-slate-100/70"
-                }`}
-              >
-                <span className="block text-[10px] font-bold text-slate-800">Analyst</span>
-                <span className="block text-[9px] text-slate-400 truncate">analyst@demo.com</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillDemoCredentials("viewer@demo.com")}
-                className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                  email === "viewer@demo.com"
-                    ? "border-sky-300 bg-sky-50/60"
-                    : "border-slate-100 bg-slate-50 hover:bg-slate-100/70"
-                }`}
-              >
-                <span className="block text-[10px] font-bold text-slate-800">Viewer</span>
-                <span className="block text-[9px] text-slate-400 truncate">viewer@demo.com</span>
-              </button>
+            <div className="space-y-1.5 text-[11px] text-slate-600 bg-slate-50 border border-slate-200/80 p-3 rounded-2xl font-mono">
+              <div className="flex justify-between items-center pb-1 border-b border-slate-200/50">
+                <span>Admin: admin@demo.com</span>
+                <span className="text-slate-900 font-bold bg-white px-1.5 py-0.5 rounded border border-slate-200">admin123</span>
+              </div>
+              <div className="flex justify-between items-center pb-1 border-b border-slate-200/50">
+                <span>Analyst: analyst@demo.com</span>
+                <span className="text-slate-900 font-bold bg-white px-1.5 py-0.5 rounded border border-slate-200">analyst123</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Viewer: viewer@demo.com</span>
+                <span className="text-slate-900 font-bold bg-white px-1.5 py-0.5 rounded border border-slate-200">viewer123</span>
+              </div>
             </div>
           </div>
         </div>
