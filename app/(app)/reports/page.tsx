@@ -1,40 +1,59 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { FileText, Plus, Calendar, ArrowRight, Loader2, Sparkles } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  FileText,
+  Plus,
+  ArrowRight,
+  X,
+  Calendar,
+  Layers,
+  Sparkles,
+} from "lucide-react";
 
-interface Report {
+interface ReportItem {
   id: string;
   title: string;
+  contentJson: string;
   periodStart: string;
   periodEnd: string;
   createdAt: string;
 }
 
-export default function ReportsPage() {
-  const [reports, setReports] = useState<Report[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [showGenerateForm, setShowGenerateForm] = useState(false);
+interface ParsedReportContent {
+  executiveSummary: string;
+  reportType?: string;
+  metrics: {
+    totalFeedback: number;
+    positiveRate: number;
+    negativeRate: number;
+    analyzedPeriod: string;
+  };
+}
 
-  const [period, setPeriod] = useState("30days");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
-  const [generatingTitle, setGeneratingTitle] = useState("");
+export default function ReportsPage() {
+  const router = useRouter();
+  const [reports, setReports] = useState<ReportItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState("");
+
+  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+  const [reportType, setReportType] = useState("Weekly VoC Executive Brief");
+  const [dateRange, setDateRange] = useState("30");
 
   const fetchReports = async () => {
+    setLoading(true);
     try {
       const res = await fetch("/api/reports");
       const data = await res.json();
       if (res.ok) {
         setReports(data.reports || []);
-      } else {
-        setError(data.error || "Failed to load reports");
+        setError("");
       }
-    } catch {
-      setError("Failed to load reports");
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -46,215 +65,231 @@ export default function ReportsPage() {
 
   const handleGenerateReport = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
     setGenerating(true);
+    setError("");
 
     try {
-      let periodStart: Date;
-      let periodEnd = new Date();
-
-      if (period === "7days") {
-        periodStart = new Date();
-        periodStart.setDate(periodStart.getDate() - 7);
-      } else if (period === "30days") {
-        periodStart = new Date();
-        periodStart.setDate(periodStart.getDate() - 30);
-      } else {
-        if (!customStart || !customEnd) {
-          setError("Please select both start and end dates");
-          setGenerating(false);
-          return;
-        }
-        periodStart = new Date(customStart);
-        periodEnd = new Date(customEnd);
-      }
-
-      const res = await fetch("/api/reports/generate", {
+      const res = await fetch("/api/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodStart: periodStart.toISOString(),
-          periodEnd: periodEnd.toISOString(),
-          title: generatingTitle || `VoC Report (${periodStart.toLocaleDateString()} - ${periodEnd.toLocaleDateString()})`,
-        }),
+        body: JSON.stringify({ reportType, dateRange }),
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
+      if (res.ok && data.report) {
+        setIsGenerateModalOpen(false);
+        router.push(`/reports/${data.report.id}`);
+      } else {
         setError(data.error || "Failed to generate report");
-        return;
       }
-
-      await fetchReports();
-      setShowGenerateForm(false);
-      setGeneratingTitle("");
-    } catch {
-      setError("Failed to generate report");
+    } catch (err) {
+      setError("An error occurred while generating report");
     } finally {
       setGenerating(false);
     }
   };
 
-  if (loading) {
-    return <div className="p-16 text-center text-slate-500">Loading reports...</div>;
-  }
+  const getParsedContent = (jsonStr: string): ParsedReportContent => {
+    try {
+      return JSON.parse(jsonStr);
+    } catch (e) {
+      return {
+        executiveSummary: jsonStr || "Report summary unavailable.",
+        metrics: { totalFeedback: 0, positiveRate: 0, negativeRate: 0, analyzedPeriod: "30 Days" },
+      };
+    }
+  };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-8 max-w-7xl mx-auto space-y-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-1">Voice-of-Customer Reports</h1>
-          <p className="text-slate-500">
-            Automated, executive-ready feedback intelligence reports powered by Claude
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Voice-of-Customer Reports
+            </h1>
+            <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200/80">
+              Executive Briefs
+            </span>
+          </div>
+          <p className="text-sm text-slate-500 mt-1">
+            Automated, executive-ready intelligence dossiers synthesized from live customer feedback.
           </p>
         </div>
+
         <button
-          onClick={() => setShowGenerateForm(!showGenerateForm)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm transition shadow-sm"
+          onClick={() => setIsGenerateModalOpen(true)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white text-xs font-bold shadow-sm transition active:scale-95 cursor-pointer shrink-0"
         >
-          <Plus className="h-4 w-4" /> Generate New Report
+          <Plus className="w-4 h-4" />
+          <span>Generate New Report</span>
         </button>
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-xs font-medium">
           {error}
         </div>
       )}
 
-      {/* Generate Form Modal / Box */}
-      {showGenerateForm && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
-          <div className="flex items-center gap-2 mb-4 text-slate-900 font-semibold text-lg">
-            <Sparkles className="h-5 w-5 text-blue-600" />
-            <span>Generate Executive VoC Synthesis</span>
+      {/* Reports Grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-60 bg-white rounded-3xl border border-sky-100 animate-pulse"
+            />
+          ))}
+        </div>
+      ) : reports.length === 0 ? (
+        <div className="p-16 text-center bg-white rounded-3xl border border-sky-100 shadow-2xs flex flex-col items-center justify-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
+            <FileText className="w-7 h-7" />
           </div>
-
-          <form onSubmit={handleGenerateReport} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">
-                Report Title (Optional)
-              </label>
-              <input
-                type="text"
-                value={generatingTitle}
-                onChange={(e) => setGeneratingTitle(e.target.value)}
-                placeholder="e.g., Monthly Executive Feedback Summary"
-                className="w-full px-3.5 py-2 border rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase mb-2">
-                Time Window
-              </label>
-              <div className="flex gap-4">
-                {["7days", "30days", "custom"].map((p) => (
-                  <label key={p} className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
-                    <input
-                      type="radio"
-                      value={p}
-                      checked={period === p}
-                      onChange={(e) => setPeriod(e.target.value)}
-                      className="text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="capitalize">{p === "7days" ? "Last 7 Days" : p === "30days" ? "Last 30 Days" : "Custom Window"}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {period === "custom" && (
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={customStart}
-                    onChange={(e) => setCustomStart(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm text-slate-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">End Date</label>
-                  <input
-                    type="date"
-                    value={customEnd}
-                    onChange={(e) => setCustomEnd(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm text-slate-900"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="submit"
-                disabled={generating}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition"
+          <div className="space-y-1 max-w-sm">
+            <h3 className="text-base font-bold text-slate-900">
+              No reports generated yet
+            </h3>
+            <p className="text-xs text-slate-500">
+              Run your first Voice-of-Customer report to aggregate sentiment patterns and executive action items.
+            </p>
+          </div>
+          <button
+            onClick={() => setIsGenerateModalOpen(true)}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 text-white text-xs font-bold shadow-2xs hover:shadow-xs transition cursor-pointer"
+          >
+            Generate VoC Report →
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {reports.map((report) => {
+            const parsed = getParsedContent(report.contentJson);
+            return (
+              <div
+                key={report.id}
+                onClick={() => router.push(`/reports/${report.id}`)}
+                className="p-6 bg-white rounded-3xl border border-sky-100/90 shadow-2xs hover:shadow-md hover:border-sky-300 transition-all flex flex-col justify-between cursor-pointer group space-y-5"
               >
-                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                {generating ? "Synthesizing with Claude..." : "Run AI Report"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowGenerateForm(false)}
-                className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+                <div className="space-y-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-sky-800 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-100">
+                      {parsed.reportType || "VoC Dossier"}
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-medium">
+                      {new Date(report.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  <h3 className="text-base font-bold text-slate-900 group-hover:text-sky-950 transition leading-snug">
+                    {report.title}
+                  </h3>
+
+                  <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
+                    {parsed.executiveSummary}
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2.5 font-bold text-slate-700">
+                    <span className="bg-slate-50 px-2 py-0.5 rounded border border-slate-100">{parsed.metrics?.totalFeedback || 0} entries</span>
+                    <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                      {parsed.metrics?.positiveRate || 0}% pos
+                    </span>
+                  </div>
+
+                  <span className="text-xs font-bold text-sky-600 flex items-center gap-1 group-hover:translate-x-1 transition">
+                    <span>View</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Reports List */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        {reports.length === 0 ? (
-          <div className="p-16 text-center text-slate-500">
-            <FileText className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-            <p className="font-medium text-slate-800">No reports generated yet.</p>
-            <p className="text-sm text-slate-400 mt-1 mb-4">Run your first VoC report to get automated insights.</p>
-            <button
-              onClick={() => setShowGenerateForm(true)}
-              className="text-sm font-semibold text-blue-600 hover:text-blue-800"
-            >
-              Generate now →
-            </button>
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {reports.map((report) => (
-              <Link
-                key={report.id}
-                href={`/reports/${report.id}`}
-                className="p-5 flex items-center justify-between hover:bg-slate-50/80 transition"
+      {/* Generate Report Modal */}
+      {isGenerateModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-sky-100 shadow-2xl max-w-md w-full p-6 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Generate VoC Report
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Automated executive intelligence synthesis
+                </p>
+              </div>
+              <button
+                onClick={() => setIsGenerateModalOpen(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
               >
-                <div className="flex items-start gap-4">
-                  <div className="p-2.5 rounded-lg bg-blue-50 text-blue-600 mt-0.5">
-                    <FileText className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-slate-900 hover:text-blue-600 transition">
-                      {report.title}
-                    </h3>
-                    <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-3.5 w-3.5" />
-                        {new Date(report.periodStart).toLocaleDateString()} – {new Date(report.periodEnd).toLocaleDateString()}
-                      </span>
-                      <span>•</span>
-                      <span>Generated {new Date(report.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                </div>
-                <ArrowRight className="h-5 w-5 text-slate-400" />
-              </Link>
-            ))}
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleGenerateReport} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                  Report Type
+                </label>
+                <select
+                  value={reportType}
+                  onChange={(e) => setReportType(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition cursor-pointer"
+                >
+                  <option value="Weekly VoC Executive Brief">Weekly VoC Executive Brief</option>
+                  <option value="Product Friction Deep Dive">Product Friction Deep Dive</option>
+                  <option value="Monthly Customer Sentiment Summary">Monthly Customer Sentiment Summary</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                  Observation Window
+                </label>
+                <select
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition cursor-pointer"
+                >
+                  <option value="7">Last 7 Days (Sprint Review)</option>
+                  <option value="30">Last 30 Days (Monthly Overview)</option>
+                  <option value="90">Last 90 Days (Quarterly Strategy)</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGenerateModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={generating}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white text-xs font-bold shadow-sm transition active:scale-95 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                >
+                  {generating ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      <span>Synthesizing...</span>
+                    </>
+                  ) : (
+                    <span>Generate Report</span>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

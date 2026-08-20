@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
 
-export default function GlobalError({
+export default function ErrorBoundary({
   error,
   reset,
 }: {
@@ -12,33 +12,37 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("Global boundary caught error:", error);
+    console.error("Application error:", error);
   }, [error]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center">
-        <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4">
-          <AlertTriangle className="h-6 w-6" />
+      <div className="w-full max-w-md bg-white rounded-3xl border border-sky-100 shadow-xl p-8 text-center space-y-6">
+        <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+          <AlertTriangle className="w-8 h-8" />
         </div>
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">
-          Something went wrong
-        </h1>
-        <p className="text-sm text-slate-600 mb-6 line-clamp-3">
-          {error.message || "An unexpected error occurred during execution."}
-        </p>
-        <div className="flex gap-3">
+
+        <div className="space-y-2">
+          <h1 className="text-xl font-bold text-slate-900">Something went wrong</h1>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            {error.message || "An unexpected error occurred during processing. Please try again."}
+          </p>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3 pt-2">
           <button
             onClick={() => reset()}
-            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm transition"
+            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white text-xs font-bold shadow-sm transition active:scale-95 cursor-pointer"
           >
-            <RefreshCw className="h-4 w-4" /> Try again
+            <RefreshCw className="w-4 h-4" />
+            <span>Try Again</span>
           </button>
           <Link
             href="/dashboard"
-            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium text-sm transition"
+            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition"
           >
-            <Home className="h-4 w-4" /> Dashboard
+            <Home className="w-4 h-4 text-slate-500" />
+            <span>Dashboard</span>
           </Link>
         </div>
       </div>

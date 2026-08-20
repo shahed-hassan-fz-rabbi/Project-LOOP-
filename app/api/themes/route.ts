@@ -1,17 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import prisma from "@/lib/prisma";
 
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const session = await auth();
-
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const workspaceId = (session.user as any).workspaceId;
+    const { searchParams } = new URL(req.url);
+    const daysParam = parseInt(searchParams.get("days") || "30", 10);
+    const days = isNaN(daysParam) ? 30 : daysParam;
 
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: session.user.id || "" },
+          { email: session.user.email || "" },
+        ],
+      },
+      select: { workspaceId: true },
+    });
+
+    if (!user?.workspaceId) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    }
+
+    const workspaceId = user.workspaceId;
+    const now = new Date();
+    const startDate = new Date();
+    startDate.setDate(now.getDate() - days);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(now.getDate() - 7);
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(now.getDate() - 14);
+
+    // Fetch themes with feedbacks
     const themes = await prisma.theme.findMany({
       where: { workspaceId },
       include: {
@@ -23,96 +49,92 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    // Format theme calculations
+    const formattedThemes = themes.map((theme) => {
+      const allLinked = theme.feedbackThemes
+        .map((ft) => ft.feedback)
+        .filter((f): f is NonNullable<typeof f> => f !== null);
 
-    const twoWeeksAgo = new Date();
-    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      const periodFeedbacks = allLinked.filter((f) => f.createdAt >= startDate);
+      const totalCount = periodFeedbacks.length;
 
-    const themeData = themes.map((theme) => {
-      const feedbackItems = theme.feedbackThemes.map((ft) => ft.feedback);
-      const totalCount = feedbackItems.length;
-
-      const sentimentCounts = {
-        POS: feedbackItems.filter((f) => f.sentiment === "POS").length,
-        NEU: feedbackItems.filter((f) => f.sentiment === "NEU").length,
-        NEG: feedbackItems.filter((f) => f.sentiment === "NEG").length,
-      };
-
-      const lastWeekCount = feedbackItems.filter(
-        (f) => new Date(f.createdAt) >= oneWeekAgo
+      const lastWeekCount = allLinked.filter((f) => f.createdAt >= sevenDaysAgo).length;
+      const prevWeekCount = allLinked.filter(
+        (f) => f.createdAt >= fourteenDaysAgo && f.createdAt < sevenDaysAgo
       ).length;
 
-      const prevWeekCount = feedbackItems.filter(
-        (f) =>
-          new Date(f.createdAt) >= twoWeeksAgo &&
-          new Date(f.createdAt) < oneWeekAgo
-      ).length;
+      let growth = 0;
+      if (prevWeekCount === 0 && lastWeekCount > 0) {
+        growth = 100;
+      } else if (prevWeekCount > 0) {
+        growth = Math.round(((lastWeekCount - prevWeekCount) / prevWeekCount) * 100);
+      }
 
-      const growth =
-        prevWeekCount > 0
-          ? Math.round(((lastWeekCount - prevWeekCount) / prevWeekCount) * 100)
-          : lastWeekCount > 0
-          ? 100
-          : 0;
+      const isSpiking = growth >= 30 || (lastWeekCount >= 4 && growth > 0);
+
+      const posCount = periodFeedbacks.filter((f) => f.sentiment === "POS").length;
+      const neuCount = periodFeedbacks.filter((f) => f.sentiment === "NEU").length;
+      const negCount = periodFeedbacks.filter((f) => f.sentiment === "NEG").length;
 
       return {
         id: theme.id,
         name: theme.name,
         description: theme.description,
-        color: theme.color,
+        color: theme.color || "#0284c7",
         totalCount,
         lastWeekCount,
         prevWeekCount,
         growth,
-        sentimentCounts,
-        isSpiking: growth >= 50 && lastWeekCount >= 2,
+        isSpiking,
+        sentimentCounts: {
+          POS: posCount,
+          NEU: neuCount,
+          NEG: negCount,
+        },
       };
     });
 
-    themeData.sort((a, b) => b.totalCount - a.totalCount);
+    formattedThemes.sort((a, b) => b.totalCount - a.totalCount);
 
-    return NextResponse.json({ themes: themeData });
-  } catch (error: any) {
-    console.error("Get themes error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
+    // Multi-theme comparative timeline for top 4 themes
+    const topThemes = formattedThemes.slice(0, 4);
+    const timelineMap = new Map<string, Record<string, any>>();
 
-export async function POST(request: NextRequest) {
-  try {
-    const session = await auth();
-
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    for (let i = 0; i <= days; i++) {
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().split("T")[0];
+      const entry: Record<string, any> = { date: dateStr };
+      topThemes.forEach((t) => {
+        entry[t.name] = 0;
+      });
+      timelineMap.set(dateStr, entry);
     }
 
-    const userRole = (session.user as any).role;
-    const workspaceId = (session.user as any).workspaceId;
-
-    if (!["ADMIN", "ANALYST"].includes(userRole)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const body = await request.json();
-    const { name, description, color } = body;
-
-    if (!name) {
-      return NextResponse.json({ error: "Theme name is required" }, { status: 400 });
-    }
-
-    const theme = await prisma.theme.create({
-      data: {
-        name,
-        description: description || "",
-        color: color || "#3b82f6",
-        workspaceId,
-      },
+    themes.forEach((theme) => {
+      const isTop = topThemes.find((t) => t.id === theme.id);
+      if (isTop) {
+        theme.feedbackThemes.forEach((ft) => {
+          if (ft.feedback && ft.feedback.createdAt >= startDate) {
+            const dStr = ft.feedback.createdAt.toISOString().split("T")[0];
+            const point = timelineMap.get(dStr);
+            if (point) {
+              point[theme.name] = (point[theme.name] || 0) + 1;
+            }
+          }
+        });
+      }
     });
 
-    return NextResponse.json({ theme }, { status: 201 });
+    const comparativeTimeline = Array.from(timelineMap.values());
+
+    return NextResponse.json({
+      themes: formattedThemes,
+      comparativeTimeline,
+      topThemeNames: topThemes.map((t) => ({ name: t.name, color: t.color })),
+    });
   } catch (error: any) {
-    console.error("Create theme error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("Themes API Error:", error);
+    return NextResponse.json({ error: error?.message || "Failed to load themes" }, { status: 500 });
   }
 }

@@ -1,227 +1,343 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Printer, MessageSquareQuote, TrendingUp, TrendingDown } from "lucide-react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  Printer,
+  Quote,
+  CheckCircle2,
+  ShieldCheck,
+} from "lucide-react";
 
-interface ReportContent {
-  narrative: string;
-  statistics: {
+interface ReportDetail {
+  id: string;
+  title: string;
+  contentJson: string;
+  periodStart: string;
+  periodEnd: string;
+  generatedBy?: string;
+  createdAt: string;
+}
+
+interface ParsedReport {
+  executiveSummary: string;
+  reportType?: string;
+  metrics: {
     totalFeedback: number;
-    sentimentBreakdown: {
-      positive: number;
-      neutral: number;
-      negative: number;
-    };
-    channels: Record<string, number>;
-    topThemes: Record<string, number>;
-    topQuotes: string[];
+    positiveRate: number;
+    negativeRate: number;
+    analyzedPeriod: string;
   };
-  sentimentShift: number;
+  findings: Array<{
+    title: string;
+    description: string;
+    quote: string;
+    type: string;
+  }>;
+  recommendations: string[];
 }
 
 export default function ReportDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [report, setReport] = useState<any>(null);
-  const [content, setContent] = useState<ReportContent | null>(null);
+  const [report, setReport] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const fetchReport = async () => {
+    async function loadReport() {
       try {
-        const id = params?.id;
-        if (!id) return;
-
-        const res = await fetch(`/api/reports/${id}`);
+        const res = await fetch("/api/reports");
         const data = await res.json();
-
-        if (res.ok) {
-          setReport(data.report);
-          setContent(data.content);
-        } else {
-          setError(data.error || "Report not found");
+        if (res.ok && data.reports) {
+          const matched = data.reports.find((r: ReportDetail) => r.id === params.id);
+          if (matched) {
+            setReport(matched);
+          } else {
+            setError("Report not found");
+          }
         }
-      } catch {
-        setError("Failed to load report");
+      } catch (err) {
+        setError("Failed to load report document");
       } finally {
         setLoading(false);
       }
-    };
+    }
+    if (params.id) {
+      loadReport();
+    }
+  }, [params.id]);
 
-    fetchReport();
-  }, [params]);
+  const handlePrint = () => {
+    window.print();
+  };
 
   if (loading) {
-    return <div className="p-16 text-center text-slate-500">Loading VoC report...</div>;
+    return (
+      <div className="p-8 max-w-4xl mx-auto space-y-6">
+        <div className="h-6 w-32 bg-slate-200 animate-pulse rounded-lg" />
+        <div className="h-96 bg-white rounded-3xl border border-sky-100 animate-pulse" />
+      </div>
+    );
   }
 
-  if (error || !report || !content) {
+  if (error || !report) {
     return (
-      <div className="p-8">
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
-          {error || "Report not found"}
+      <div className="p-8 max-w-4xl mx-auto">
+        <div className="p-6 bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-sm flex items-center justify-between">
+          <span>{error || "Report document not found."}</span>
+          <Link href="/reports" className="text-xs font-bold underline">
+            Back to Reports
+          </Link>
         </div>
       </div>
     );
   }
 
-  const maxThemeCount = Math.max(...Object.values(content.statistics.topThemes || {}), 1);
-  const maxChannelCount = Math.max(...Object.values(content.statistics.channels || {}), 1);
+  let parsed: ParsedReport;
+  try {
+    parsed = JSON.parse(report.contentJson);
+  } catch (e) {
+    parsed = {
+      executiveSummary: report.contentJson || "Summary unavailable.",
+      metrics: { totalFeedback: 0, positiveRate: 0, negativeRate: 0, analyzedPeriod: "30 Days" },
+      findings: [],
+      recommendations: [],
+    };
+  }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto bg-slate-50 min-h-screen print:p-0 print:m-0 print:max-w-full print:bg-white">
-      {/* Action Header - Hidden on Print */}
-      <div className="flex items-center justify-between mb-6 print:hidden">
-        <button
-          onClick={() => router.push("/reports")}
-          className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 transition"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to Reports
-        </button>
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium transition shadow-sm"
-        >
-          <Printer className="h-4 w-4" /> Print / Save as PDF
-        </button>
-      </div>
-
-      {/* Main Report Card */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 mb-8 print:border-none print:shadow-none print:p-0 print:mb-6">
-        <div className="border-b border-slate-100 pb-6 mb-6">
-          <span className="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded print:border print:border-blue-200">
-            Voice of Customer Report
-          </span>
-          <h1 className="text-3xl font-bold text-slate-900 mt-3">{report.title}</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Window: {new Date(report.periodStart).toLocaleDateString()} to {new Date(report.periodEnd).toLocaleDateString()}
-          </p>
-        </div>
-
-        {/* Top KPI Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100 mb-8 print:bg-slate-50 print:border print:border-slate-200">
-          <div>
-            <p className="text-xs text-slate-500 uppercase font-semibold">Total Submissions</p>
-            <p className="text-2xl font-bold text-slate-900 mt-1">{content.statistics.totalFeedback}</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 uppercase font-semibold">Positive Share</p>
-            <p className="text-2xl font-bold text-emerald-600 mt-1">
-              {Math.round((content.statistics.sentimentBreakdown.positive / content.statistics.totalFeedback) * 100)}%
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 uppercase font-semibold">Negative Share</p>
-            <p className="text-2xl font-bold text-rose-600 mt-1">
-              {Math.round((content.statistics.sentimentBreakdown.negative / content.statistics.totalFeedback) * 100)}%
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 uppercase font-semibold">Negative Shift</p>
-            <p className={`text-2xl font-bold mt-1 flex items-center gap-1 ${content.sentimentShift > 0 ? "text-rose-600" : "text-emerald-600"}`}>
-              {content.sentimentShift > 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-              {content.sentimentShift > 0 ? `+${content.sentimentShift}%` : `${content.sentimentShift}%`}
-            </p>
-          </div>
-        </div>
-
-        {/* AI Narrative Section */}
-        <div className="prose prose-slate max-w-none space-y-4 text-sm leading-relaxed text-slate-800">
-          {content.narrative.split("\n\n").map((paragraph, idx) => (
-            <p key={idx}>{paragraph}</p>
-          ))}
-        </div>
-      </div>
-
-      {/* Breakdown Grids */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 print:grid-cols-2">
-        {/* Top Themes */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 print:border print:border-slate-200">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 mb-4">Top Feedback Themes</h2>
-          <div className="space-y-3">
-            {Object.entries(content.statistics.topThemes)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 5)
-              .map(([theme, count]) => (
-                <div key={theme}>
-                  <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                    <span>{theme}</span>
-                    <span>{count} mentions</span>
-                  </div>
-                  <div className="w-full bg-slate-100 rounded-full h-2">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full"
-                      style={{ width: `${(count / maxThemeCount) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-
-        {/* Channel Ingestion Breakdown */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 print:border print:border-slate-200">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 mb-4">Feedback Channels</h2>
-          <div className="space-y-3">
-            {Object.entries(content.statistics.channels)
-              .sort((a, b) => b[1] - a[1])
-              .map(([channel, count]) => (
-                <div key={channel}>
-                  <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                    <span>{channel}</span>
-                    <span>{count} items</span>
-                  </div>
-                  <div className="w-full bg-slate-100 rounded-full h-2">
-                    <div
-                      className="bg-emerald-600 h-2 rounded-full"
-                      style={{ width: `${(count / maxChannelCount) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Notable Quotes */}
-      {content.statistics.topQuotes && content.statistics.topQuotes.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8 print:border print:border-slate-200">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 mb-4 flex items-center gap-2">
-            <MessageSquareQuote className="h-4 w-4 text-blue-600" /> Grounded Customer Voice Quotes
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 print:grid-cols-2">
-            {content.statistics.topQuotes.map((quote, idx) => (
-              <div key={idx} className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-xs italic text-slate-700">
-                "{quote}"
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Global CSS to completely remove sidebar during print */}
+    <>
       <style jsx global>{`
         @media print {
           @page {
-            margin: 1.2cm;
+            size: A4 portrait;
+            margin: 12mm 15mm;
           }
-          body {
+
+          html,
+          body,
+          body > div,
+          body > div > div,
+          main,
+          section,
+          article {
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            overflow-y: visible !important;
+            overflow-x: visible !important;
             background: #ffffff !important;
             color: #0f172a !important;
+            display: block !important;
+            position: static !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-          aside, nav, header, .print\\:hidden {
-            display: none !important;
-            visibility: hidden !important;
-            width: 0 !important;
-            height: 0 !important;
-          }
-          main, div {
+
+          body * {
             overflow: visible !important;
+            max-height: none !important;
+          }
+
+          aside,
+          nav,
+          header,
+          button,
+          .no-print,
+          .print\\:hidden {
+            display: none !important;
+          }
+
+          main {
+            display: block !important;
+            width: 100% !important;
+            max-width: none !important;
+            height: auto !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+
+          .report-outer-wrapper {
+            display: block !important;
+            width: 100% !important;
+            max-width: none !important;
+            height: auto !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+
+          .printable-report-canvas {
+            display: block !important;
+            width: 100% !important;
+            max-width: none !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            overflow: visible !important;
+          }
+
+          .print-section {
+            break-inside: auto !important;
+            page-break-inside: auto !important;
+            overflow: visible !important;
+            height: auto !important;
+          }
+
+          .print-card {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            overflow: visible !important;
+            height: auto !important;
+          }
+
+          h1, h2, h3 {
+            break-after: avoid !important;
+            page-break-after: avoid !important;
           }
         }
       `}</style>
-    </div>
+
+      <div className="report-outer-wrapper p-6 md:p-10 max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between no-print print:hidden">
+          <button
+            onClick={() => router.push("/reports")}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to All Reports</span>
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white text-xs font-bold transition shadow-sm cursor-pointer active:scale-95"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Print / Save as PDF</span>
+          </button>
+        </div>
+
+        <div className="printable-report-canvas bg-white rounded-3xl border border-sky-100 shadow-sm p-8 md:p-12 space-y-8 print-section">
+          <div className="pb-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-start justify-between gap-4 print-card">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-sky-800 bg-sky-50 px-2.5 py-0.5 rounded border border-sky-200">
+                  Voice-of-Customer Intelligence
+                </span>
+                <span className="text-[11px] font-bold uppercase px-2.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" /> Grounded Analysis
+                </span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+                {report.title}
+              </h1>
+              <p className="text-xs text-slate-500 font-medium">
+                Observation Period: {new Date(report.periodStart).toLocaleDateString()} – {new Date(report.periodEnd).toLocaleDateString()}
+              </p>
+            </div>
+
+            <div className="text-left sm:text-right text-xs text-slate-500 space-y-1 shrink-0 pt-1">
+              <p><strong>Generated:</strong> {new Date(report.createdAt).toLocaleDateString()}</p>
+              <p><strong>Engine:</strong> LOOP Automated Synthesis</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 print-card">
+            <div className="p-4 bg-sky-50/70 rounded-2xl border border-sky-100">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-sky-800">Analyzed Intake</span>
+              <p className="text-3xl font-extrabold text-slate-900 mt-1">{parsed.metrics?.totalFeedback || 0}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Customer feedback entries</p>
+            </div>
+
+            <div className="p-4 bg-emerald-50/70 rounded-2xl border border-emerald-100">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Positive Sentiment</span>
+              <p className="text-3xl font-extrabold text-emerald-800 mt-1">{parsed.metrics?.positiveRate || 0}%</p>
+              <p className="text-[11px] text-emerald-700 mt-0.5">High satisfaction drivers</p>
+            </div>
+
+            <div className="p-4 bg-rose-50/70 rounded-2xl border border-rose-100">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-800">Critical Friction</span>
+              <p className="text-3xl font-extrabold text-rose-800 mt-1">{parsed.metrics?.negativeRate || 0}%</p>
+              <p className="text-[11px] text-rose-700 mt-0.5">Reported friction/bugs</p>
+            </div>
+          </div>
+
+          <div className="space-y-2.5 print-section">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              1. Executive Synthesis Summary
+            </h2>
+            <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-5 rounded-2xl border border-slate-200/80 whitespace-pre-line font-medium print-card">
+              {parsed.executiveSummary}
+            </p>
+          </div>
+
+          {parsed.findings && parsed.findings.length > 0 && (
+            <div className="space-y-4 print-section">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                2. Critical Findings & Customer Evidence
+              </h2>
+              <div className="space-y-3.5 print-section">
+                {parsed.findings.map((f, i) => (
+                  <div
+                    key={i}
+                    className="p-5 rounded-2xl border border-sky-100 bg-white shadow-2xs space-y-2.5 print-card"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-slate-900">{f.title}</h3>
+                      <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-100">
+                        {f.type}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">{f.description}</p>
+                    
+                    <div className="p-3 rounded-xl bg-slate-50 text-xs text-slate-700 italic border border-slate-200/80 flex items-start gap-2.5">
+                      <Quote className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                      <span>"{f.quote}"</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {parsed.recommendations && parsed.recommendations.length > 0 && (
+            <div className="space-y-3.5 print-section">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                3. Strategic Product Roadmap Actions
+              </h2>
+              <div className="space-y-2.5 print-section">
+                {parsed.recommendations.map((rec, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-200 flex items-start gap-3 text-xs text-slate-800 font-medium leading-relaxed print-card"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>{rec}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-6 border-t border-slate-200 flex justify-between items-center text-xs text-slate-400 print-card">
+            <span>LOOP Voice-of-Customer Intelligence Platform</span>
+            <span>Confidential Executive Product Brief</span>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

@@ -1,31 +1,153 @@
+"use client";
+
 import Link from "next/link";
-import { Sparkles, ArrowRight } from "lucide-react";
+import Image from "next/image";
+import { useState, useEffect } from "react";
+import { Sparkles, ArrowRight, Menu, X } from "lucide-react";
 
 export default function Navbar() {
-  return (
-    <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm">
-            <Sparkles className="h-5 w-5" />
-          </div>
-          <span className="text-xl font-bold tracking-tight text-slate-900">LOOP</span>
-        </Link>
+  const [scrolled, setScrolled] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-        <div className="flex items-center gap-4">
-          <Link
-            href="/login"
-            className="text-sm font-semibold text-slate-700 hover:text-slate-900 px-3 py-2 transition"
-          >
-            Sign In
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 20);
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  return (
+    <header
+      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-200 ${
+        scrolled
+          ? "bg-white/85 backdrop-blur-md shadow-sm border-b border-sky-100/80 py-3"
+          : "bg-transparent py-5"
+      }`}
+    >
+      <div className="max-w-7xl mx-auto px-6 sm:px-8">
+        <div className="flex items-center justify-between">
+          
+          {/* Brand Logo */}
+          <Link href="/" className="flex items-center gap-3 group">
+            <div className="relative h-9 w-9 rounded-xl overflow-hidden flex items-center justify-center border border-emerald-200 bg-white shadow-sm group-hover:scale-105 transition-transform duration-200">
+              <Image
+                src="/logo.png"
+                alt="LOOP Logo"
+                width={36}
+                height={36}
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-extrabold text-lg text-slate-900 tracking-tight leading-none group-hover:text-sky-600 transition-colors">
+                LOOP
+              </span>
+              <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider mt-0.5">
+                Feedback Intelligence
+              </span>
+            </div>
           </Link>
-          <Link
-            href="/signup"
-            className="inline-flex items-center gap-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg shadow-sm transition"
+
+          {/* Desktop Navigation Links */}
+          <nav className="hidden md:flex items-center gap-1 bg-white/70 backdrop-blur-md px-4 py-1.5 rounded-full border border-sky-100/90 shadow-sm text-sm font-medium text-slate-600">
+            <a
+              href="#features"
+              className="px-3.5 py-1.5 rounded-full hover:text-sky-600 hover:bg-sky-50/70 transition-all"
+            >
+              Platform
+            </a>
+            <a
+              href="#analytics"
+              className="px-3.5 py-1.5 rounded-full hover:text-emerald-600 hover:bg-emerald-50/70 transition-all"
+            >
+              Analytics
+            </a>
+            <a
+              href="#rag"
+              className="px-3.5 py-1.5 rounded-full hover:text-sky-600 hover:bg-sky-50/70 transition-all"
+            >
+              Ask LOOP AI
+            </a>
+            <a
+              href="#security"
+              className="px-3.5 py-1.5 rounded-full hover:text-emerald-600 hover:bg-emerald-50/70 transition-all"
+            >
+              Enterprise RBAC
+            </a>
+          </nav>
+
+          {/* Right Action CTA */}
+          <div className="hidden md:flex items-center gap-3">
+            <Link
+              href="/login"
+              className="px-4 py-2 text-sm font-semibold text-slate-700 hover:text-sky-600 transition"
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white rounded-xl shadow-sm hover:shadow transition active:scale-95"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Launch App</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+            </Link>
+          </div>
+
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden p-2 text-slate-700 hover:text-sky-600 rounded-lg"
+            aria-label="Toggle menu"
           >
-            Get Started Free <ArrowRight className="h-4 w-4" />
-          </Link>
+            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+
         </div>
+
+        {/* Mobile Dropdown Menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden mt-3 p-4 bg-white rounded-2xl border border-sky-100 shadow-xl space-y-3">
+            <a
+              href="#features"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block px-3 py-2 text-sm font-medium text-slate-700 hover:bg-sky-50 rounded-lg"
+            >
+              Platform
+            </a>
+            <a
+              href="#analytics"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block px-3 py-2 text-sm font-medium text-slate-700 hover:bg-emerald-50 rounded-lg"
+            >
+              Analytics
+            </a>
+            <a
+              href="#rag"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block px-3 py-2 text-sm font-medium text-slate-700 hover:bg-sky-50 rounded-lg"
+            >
+              Ask LOOP AI
+            </a>
+            <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
+              <Link
+                href="/login"
+                className="w-full text-center py-2 text-sm font-semibold text-slate-700 bg-slate-50 rounded-lg"
+              >
+                Sign In
+              </Link>
+              <Link
+                href="/login"
+                className="w-full text-center py-2 text-sm font-semibold bg-sky-600 text-white rounded-lg shadow-sm"
+              >
+                Launch App
+              </Link>
+            </div>
+          </div>
+        )}
+
       </div>
     </header>
   );

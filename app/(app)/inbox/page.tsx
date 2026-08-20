@@ -1,71 +1,83 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
-import { Plus, Upload, Sparkles, RefreshCw, Trash2 } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import {
+  Inbox,
+  Search,
+  Plus,
+  X,
+  ChevronRight,
+  Sparkles,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  Tag,
+} from "lucide-react";
 
-interface Feedback {
+interface FeedbackTheme {
+  theme: {
+    id: string;
+    name: string;
+    color: string;
+  };
+}
+
+interface FeedbackItem {
   id: string;
   content: string;
   channel: string;
-  sentiment: string;
-  status: string;
+  sentiment: "POS" | "NEU" | "NEG";
+  sentimentScore: number;
+  status: "NEW" | "REVIEWED" | "ACTIONED";
+  customerLabel?: string;
   createdAt: string;
-  feedbackThemes?: Array<{ theme: { name: string } }>;
+  feedbackThemes?: FeedbackTheme[];
 }
 
-interface PaginationInfo {
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
+const CHANNELS = [
+  "All Channels",
+  "Support Ticket",
+  "App Store Review",
+  "Community Post",
+  "NPS Survey",
+  "Sales Call Note",
+  "Testimonial",
+  "Feature Request",
+];
+const SENTIMENTS = ["All Sentiments", "POS", "NEU", "NEG"];
+const STATUSES = ["All Statuses", "NEW", "REVIEWED", "ACTIONED"];
 
 export default function InboxPage() {
-  const { data: session } = useSession();
-  const [feedback, setFeedback] = useState<Feedback[]>([]);
-  const [pagination, setPagination] = useState<PaginationInfo>({
-    total: 0,
-    page: 1,
-    limit: 10,
-    totalPages: 0,
-  });
-
-  const [loading, setLoading] = useState(false);
+  const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [classifyingId, setClassifyingId] = useState<string | null>(null);
 
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [formData, setFormData] = useState({
-    content: "",
-    channel: "Support Ticket",
-    customerLabel: "",
-  });
+  const [search, setSearch] = useState("");
+  const [channel, setChannel] = useState("All Channels");
+  const [sentiment, setSentiment] = useState("All Sentiments");
+  const [status, setStatus] = useState("All Statuses");
 
-  const [csvFile, setCSVFile] = useState<File | null>(null);
+  // Add Feedback Modal
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newContent, setNewContent] = useState("");
+  const [newChannel, setNewChannel] = useState("Support Ticket");
+  const [newSentiment, setNewSentiment] = useState<"POS" | "NEU" | "NEG">("NEU");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [filters, setFilters] = useState({
-    channel: "",
-    sentiment: "",
-    status: "",
-    search: "",
-  });
+  // Detail Modal / Slide-over State
+  const [selectedFeedback, setSelectedFeedback] = useState<FeedbackItem | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
-  const loadFeedback = async (page = 1) => {
+  const fetchFeedbacks = async () => {
     setLoading(true);
-    setError("");
-
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: "10",
-        ...(filters.channel && { channel: filters.channel }),
-        ...(filters.sentiment && { sentiment: filters.sentiment }),
-        ...(filters.status && { status: filters.status }),
-        ...(filters.search && { search: filters.search }),
-      });
+      const params = new URLSearchParams();
+      if (search) params.append("search", search);
+      if (channel !== "All Channels") params.append("channel", channel);
+      if (sentiment !== "All Sentiments") params.append("sentiment", sentiment);
+      if (status !== "All Statuses") params.append("status", status);
 
-      const res = await fetch(`/api/feedback?${params}`);
+      const res = await fetch(`/api/feedback?${params.toString()}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -73,9 +85,9 @@ export default function InboxPage() {
         return;
       }
 
-      setFeedback(data.feedback || []);
-      setPagination(data.pagination);
-    } catch (err: any) {
+      setFeedbacks(data.feedbacks || []);
+      setError("");
+    } catch (err) {
       setError("Failed to load feedback");
     } finally {
       setLoading(false);
@@ -83,351 +95,426 @@ export default function InboxPage() {
   };
 
   useEffect(() => {
-    loadFeedback();
-  }, [filters]);
+    const timer = setTimeout(() => {
+      fetchFeedbacks();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search, channel, sentiment, status]);
 
   const handleAddFeedback = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    if (!newContent.trim()) return;
 
+    setIsSubmitting(true);
     try {
       const res = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Failed to add feedback");
-        return;
-      }
-
-      setFormData({ content: "", channel: "Support Ticket", customerLabel: "" });
-      setShowAddForm(false);
-      loadFeedback();
-    } catch (err: any) {
-      setError("Failed to add feedback");
-    }
-  };
-
-  const handleCSVUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!csvFile) return;
-
-    try {
-      const body = new FormData();
-      body.append("file", csvFile);
-
-      const res = await fetch("/api/feedback/csv", {
-        method: "POST",
-        body,
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        alert(`Imported: ${data.imported}, Failed: ${data.failed}`);
-        setCSVFile(null);
-        loadFeedback();
-      } else {
-        setError(data.error || "Upload failed");
-      }
-    } catch (err) {
-      setError("Failed to upload CSV");
-    }
-  };
-
-  const handleSimulate = async () => {
-    try {
-      const res = await fetch("/api/feedback/simulate", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        alert(`Imported ${data.created} items from simulated channel`);
-        loadFeedback();
-      }
-    } catch (err) {
-      setError("Failed to simulate feedback");
-    }
-  };
-
-  const handleReClassify = async (id: string) => {
-    setClassifyingId(id);
-    try {
-      const res = await fetch("/api/feedback/classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feedbackId: id }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        loadFeedback(pagination.page);
-      } else {
-        alert(data.error || "Failed to classify");
-      }
-    } catch (err) {
-      alert("Error re-classifying feedback");
-    } finally {
-      setClassifyingId(null);
-    }
-  };
-
-  const handleStatusChange = async (id: string, newStatus: string) => {
-    try {
-      const res = await fetch(`/api/feedback/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({
+          content: newContent,
+          channel: newChannel,
+          sentiment: newSentiment,
+          customerLabel: "Manual User",
+        }),
       });
 
       if (res.ok) {
-        loadFeedback(pagination.page);
+        setNewContent("");
+        setIsAddModalOpen(false);
+        fetchFeedbacks();
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const isViewer = (session?.user as any)?.role === "VIEWER";
-
   return (
-    <div className="p-8">
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-8 max-w-7xl mx-auto space-y-7">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-1">Feedback Inbox</h1>
-          <p className="text-slate-500">Manage and analyze customer feedback from all channels</p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+            Feedback Inbox
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Manage, inspect, and drill down into voice-of-customer messages.
+          </p>
         </div>
 
-        {!isViewer && (
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm transition"
-            >
-              <Plus className="h-4 w-4" /> Add Feedback
-            </button>
-            <label className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 cursor-pointer font-medium text-sm transition">
-              <Upload className="h-4 w-4" /> Import CSV
-              <input
-                type="file"
-                accept=".csv"
-                onChange={(e) => setCSVFile(e.target.files?.[0] || null)}
-                className="hidden"
-              />
-            </label>
-            {csvFile && (
-              <button
-                onClick={handleCSVUpload}
-                className="px-4 py-2 bg-emerald-800 text-white rounded-lg font-medium text-sm"
-              >
-                Upload {csvFile.name}
-              </button>
-            )}
-            <button
-              onClick={handleSimulate}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium text-sm transition"
-            >
-              <Sparkles className="h-4 w-4" /> Import Demo Tickets
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white text-xs font-semibold shadow-sm transition active:scale-95 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Feedback</span>
+          </button>
+        </div>
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-xs font-medium">
           {error}
         </div>
       )}
 
-      {/* Add Feedback Form */}
-      {showAddForm && (
-        <div className="mb-8 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h2 className="text-lg font-semibold mb-4 text-slate-900">Add Single Feedback</h2>
-          <form onSubmit={handleAddFeedback} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Feedback Content</label>
-              <textarea
-                value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                placeholder="Enter customer quote or support message..."
-                className="w-full px-3 py-2 border rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500"
-                rows={3}
-                required
+      {/* Filter Controls Bar */}
+      <div className="p-4 rounded-2xl bg-white border border-sky-100 shadow-2xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Search feedback text..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition"
+          />
+        </div>
+
+        <div>
+          <select
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition cursor-pointer"
+          >
+            {CHANNELS.map((ch) => (
+              <option key={ch} value={ch}>
+                {ch}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <select
+            value={sentiment}
+            onChange={(e) => setSentiment(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition cursor-pointer"
+          >
+            {SENTIMENTS.map((st) => (
+              <option key={st} value={st}>
+                {st === "POS"
+                  ? "Positive"
+                  : st === "NEG"
+                  ? "Negative"
+                  : st === "NEU"
+                  ? "Neutral"
+                  : st}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition cursor-pointer"
+          >
+            {STATUSES.map((st) => (
+              <option key={st} value={st}>
+                {st}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Feedback Feed */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+            Records ({feedbacks.length})
+          </span>
+          <span className="text-xs text-slate-400">Click any card to read full details</span>
+        </div>
+
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div
+                key={i}
+                className="h-24 bg-white rounded-2xl border border-sky-100 animate-pulse"
               />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Channel</label>
-                <select
-                  value={formData.channel}
-                  onChange={(e) => setFormData({ ...formData, channel: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm text-slate-900"
-                >
-                  <option>Support Ticket</option>
-                  <option>App Store Review</option>
-                  <option>NPS Survey</option>
-                  <option>Sales Call Note</option>
-                  <option>Community Post</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Customer Label</label>
-                <input
-                  type="text"
-                  value={formData.customerLabel}
-                  onChange={(e) => setFormData({ ...formData, customerLabel: e.target.value })}
-                  placeholder="e.g. Enterprise Client"
-                  className="w-full px-3 py-2 border rounded-lg text-sm text-slate-900"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+            ))}
+          </div>
+        ) : feedbacks.length === 0 ? (
+          <div className="p-12 text-center bg-white rounded-2xl border border-sky-100 text-slate-400 text-xs flex flex-col items-center justify-center">
+            <Inbox className="w-8 h-8 text-slate-300 mb-2" />
+            <span>No matching feedback records found for this filter.</span>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {feedbacks.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => setSelectedFeedback(item)}
+                className="p-5 bg-white rounded-2xl border border-sky-100/90 shadow-2xs hover:shadow-xs hover:border-sky-300 hover:ring-2 hover:ring-sky-500/5 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group"
               >
-                Save & Auto-Classify
-              </button>
+                {/* Left: Content & Meta */}
+                <div className="space-y-2 max-w-3xl">
+                  <p className="text-xs sm:text-sm font-medium text-slate-800 leading-relaxed group-hover:text-sky-950 transition">
+                    "{item.content}"
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-slate-400">
+                    <span className="font-semibold text-slate-700">
+                      {item.customerLabel || "Anonymous"}
+                    </span>
+                    <span>•</span>
+                    <span className="text-slate-500">{item.channel}</span>
+                    <span>•</span>
+                    <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+
+                    {/* Theme Badges */}
+                    {item.feedbackThemes && item.feedbackThemes.length > 0 && (
+                      <>
+                        <span>•</span>
+                        <div className="flex items-center gap-1.5">
+                          {item.feedbackThemes.map((ft, idx) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-0.5 rounded-md bg-sky-50 text-sky-800 border border-sky-100 font-semibold text-[10px]"
+                            >
+                              {ft.theme.name}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: Badges & Action */}
+                <div className="flex items-center gap-2.5 shrink-0 self-start md:self-auto">
+                  <span
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
+                      item.sentiment === "POS"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : item.sentiment === "NEG"
+                        ? "bg-rose-50 text-rose-700 border-rose-200"
+                        : "bg-slate-50 text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    {item.sentiment === "POS"
+                      ? "Positive"
+                      : item.sentiment === "NEG"
+                      ? "Negative"
+                      : "Neutral"}
+                  </span>
+
+                  <span
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border ${
+                      item.status === "ACTIONED"
+                        ? "bg-sky-50 text-sky-700 border-sky-200"
+                        : item.status === "REVIEWED"
+                        ? "bg-emerald-50/60 text-emerald-700 border-emerald-200"
+                        : "bg-amber-50 text-amber-700 border-amber-200"
+                    }`}
+                  >
+                    {item.status}
+                  </span>
+
+                  <div className="p-1 rounded-lg text-slate-300 group-hover:text-sky-600 transition">
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Details Slide-Over / Full Read Modal */}
+      {selectedFeedback && (
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-sky-100 shadow-2xl max-w-2xl w-full p-7 space-y-6 animate-in fade-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-4 border-b border-slate-100">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-sky-700 bg-sky-50 px-2.5 py-1 rounded-full border border-sky-100">
+                  Feedback Intelligence Details
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-2">
+                  Voice of Customer Record
+                </h3>
+              </div>
               <button
-                type="button"
-                onClick={() => setShowAddForm(false)}
-                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium"
+                onClick={() => setSelectedFeedback(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
               >
-                Cancel
+                <X className="w-5 h-5" />
               </button>
             </div>
-          </form>
+
+            {/* Full Message Quote */}
+            <div className="p-5 rounded-2xl bg-sky-50/30 border border-sky-100/80 space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Full Message Text
+              </span>
+              <p className="text-sm font-medium text-slate-800 leading-relaxed whitespace-pre-wrap">
+                "{selectedFeedback.content}"
+              </p>
+            </div>
+
+            {/* Metadata Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+                <span className="text-[10px] font-bold uppercase text-slate-400">Customer</span>
+                <p className="text-xs font-bold text-slate-800 mt-1 truncate">
+                  {selectedFeedback.customerLabel || "Direct User"}
+                </p>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+                <span className="text-[10px] font-bold uppercase text-slate-400">Channel</span>
+                <p className="text-xs font-bold text-slate-800 mt-1 truncate">
+                  {selectedFeedback.channel}
+                </p>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+                <span className="text-[10px] font-bold uppercase text-slate-400">Sentiment</span>
+                <p className={`text-xs font-bold mt-1 ${
+                  selectedFeedback.sentiment === "POS" ? "text-emerald-600" : selectedFeedback.sentiment === "NEG" ? "text-rose-600" : "text-slate-700"
+                }`}>
+                  {selectedFeedback.sentiment === "POS" ? "Positive" : selectedFeedback.sentiment === "NEG" ? "Negative" : "Neutral"}
+                </p>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+                <span className="text-[10px] font-bold uppercase text-slate-400">Date</span>
+                <p className="text-xs font-bold text-slate-800 mt-1">
+                  {new Date(selectedFeedback.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Assigned Themes */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Categorized Themes
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {selectedFeedback.feedbackThemes && selectedFeedback.feedbackThemes.length > 0 ? (
+                  selectedFeedback.feedbackThemes.map((ft, i) => (
+                    <span
+                      key={i}
+                      className="px-3 py-1 rounded-xl bg-sky-50 text-sky-800 border border-sky-100 font-semibold text-xs flex items-center gap-1.5"
+                    >
+                      <Tag className="w-3 h-3 text-sky-600" />
+                      {ft.theme.name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-slate-400">No theme assigned yet.</span>
+                )}
+              </div>
+            </div>
+
+            {/* Close Button */}
+            <div className="flex justify-end pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setSelectedFeedback(null)}
+                className="px-5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Close Details
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Filters Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <input
-          type="text"
-          placeholder="Search feedback..."
-          value={filters.search}
-          onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-          className="px-3.5 py-2 border rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 bg-white"
-        />
-        <select
-          value={filters.channel}
-          onChange={(e) => setFilters({ ...filters, channel: e.target.value })}
-          className="px-3.5 py-2 border rounded-lg text-sm text-slate-900 bg-white"
-        >
-          <option value="">All Channels</option>
-          <option>Support Ticket</option>
-          <option>App Store Review</option>
-          <option>NPS Survey</option>
-          <option>Sales Call Note</option>
-          <option>Community Post</option>
-        </select>
-        <select
-          value={filters.sentiment}
-          onChange={(e) => setFilters({ ...filters, sentiment: e.target.value })}
-          className="px-3.5 py-2 border rounded-lg text-sm text-slate-900 bg-white"
-        >
-          <option value="">All Sentiments</option>
-          <option value="POS">Positive</option>
-          <option value="NEU">Neutral</option>
-          <option value="NEG">Negative</option>
-        </select>
-        <select
-          value={filters.status}
-          onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-          className="px-3.5 py-2 border rounded-lg text-sm text-slate-900 bg-white"
-        >
-          <option value="">All Statuses</option>
-          <option value="NEW">New</option>
-          <option value="REVIEWED">Reviewed</option>
-          <option value="ACTIONED">Actioned</option>
-        </select>
-      </div>
+      {/* Add Feedback Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-sky-100 shadow-xl max-w-lg w-full p-6 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Ingest New Feedback
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Submit customer voice for automated analysis
+                </p>
+              </div>
+              <button
+                onClick={() => setIsAddModalOpen(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-      {/* Feedback Table */}
-      {loading ? (
-        <div className="p-16 text-center text-slate-500">Loading inbox...</div>
-      ) : feedback.length === 0 ? (
-        <div className="p-12 text-center bg-white rounded-xl shadow-sm border border-slate-200 text-slate-500">
-          No feedback found. Try adding some or importing demo tickets!
-        </div>
-      ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-              <tr>
-                <th className="p-4">Content</th>
-                <th className="p-4">Channel</th>
-                <th className="p-4">Sentiment</th>
-                <th className="p-4">Themes</th>
-                <th className="p-4">Status</th>
-                {!isViewer && <th className="p-4">Actions</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-800">
-              {feedback.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/80 transition">
-                  <td className="p-4 max-w-sm">
-                    <p className="font-medium text-slate-900 leading-snug line-clamp-2">{item.content}</p>
-                    <span className="text-[11px] text-slate-400 mt-1 block">
-                      {new Date(item.createdAt).toLocaleDateString()}
-                    </span>
-                  </td>
-                  <td className="p-4 text-slate-600">{item.channel}</td>
-                  <td className="p-4">
-                    <span
-                      className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        item.sentiment === "POS"
-                          ? "bg-emerald-100 text-emerald-800"
-                          : item.sentiment === "NEG"
-                          ? "bg-rose-100 text-rose-800"
-                          : "bg-slate-100 text-slate-700"
-                      }`}
-                    >
-                      {item.sentiment}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <div className="flex flex-wrap gap-1">
-                      {item.feedbackThemes && item.feedbackThemes.length > 0 ? (
-                        item.feedbackThemes.map((ft, idx) => (
-                          <span key={idx} className="px-2 py-0.5 rounded text-[11px] bg-indigo-50 text-indigo-700 font-medium">
-                            {ft.theme.name}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">Unassigned</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="p-4">
-                    <select
-                      value={item.status}
-                      disabled={isViewer}
-                      onChange={(e) => handleStatusChange(item.id, e.target.value)}
-                      className="text-xs px-2.5 py-1 rounded-md font-semibold border border-slate-200 bg-white"
-                    >
-                      <option value="NEW">NEW</option>
-                      <option value="REVIEWED">REVIEWED</option>
-                      <option value="ACTIONED">ACTIONED</option>
-                    </select>
-                  </td>
-                  {!isViewer && (
-                    <td className="p-4 space-x-2">
-                      <button
-                        onClick={() => handleReClassify(item.id)}
-                        disabled={classifyingId === item.id}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-purple-600 hover:text-purple-800 disabled:opacity-50"
-                      >
-                        <RefreshCw className={`h-3 w-3 ${classifyingId === item.id ? "animate-spin" : ""}`} />
-                        Re-classify
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <form onSubmit={handleAddFeedback} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                  Feedback Text
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Paste customer message, survey response, or review here..."
+                  value={newContent}
+                  onChange={(e) => setNewContent(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                    Channel Source
+                  </label>
+                  <select
+                    value={newChannel}
+                    onChange={(e) => setNewChannel(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition cursor-pointer"
+                  >
+                    {CHANNELS.filter((c) => c !== "All Channels").map((ch) => (
+                      <option key={ch} value={ch}>
+                        {ch}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                    Sentiment
+                  </label>
+                  <select
+                    value={newSentiment}
+                    onChange={(e) => setNewSentiment(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-sky-100 text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:bg-white transition cursor-pointer"
+                  >
+                    <option value="POS">Positive</option>
+                    <option value="NEU">Neutral</option>
+                    <option value="NEG">Negative</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-700 hover:to-emerald-700 text-white text-xs font-semibold shadow-sm transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmitting ? "Ingesting..." : "Ingest Feedback"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

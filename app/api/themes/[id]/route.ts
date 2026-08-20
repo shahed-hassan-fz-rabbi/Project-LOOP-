@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import prisma from "@/lib/prisma";
 
 export async function GET(
-  request: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await auth();
-
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id } = await context.params;
-    const workspaceId = (session.user as any).workspaceId;
 
     const theme = await prisma.theme.findUnique({
       where: { id },
@@ -22,6 +20,11 @@ export async function GET(
         feedbackThemes: {
           include: {
             feedback: true,
+          },
+          orderBy: {
+            feedback: {
+              createdAt: "desc",
+            },
           },
         },
       },
@@ -31,40 +34,31 @@ export async function GET(
       return NextResponse.json({ error: "Theme not found" }, { status: 404 });
     }
 
-    if (theme.workspaceId !== workspaceId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const linkedFeedbacks = theme.feedbackThemes
+      .map((ft) => ft.feedback)
+      .filter((f): f is NonNullable<typeof f> => f !== null);
+
+    // 30 Days daily volume timeline for this specific theme
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+
+    const timelineMap = new Map<string, number>();
+    for (let i = 0; i <= 30; i++) {
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + i);
+      timelineMap.set(d.toISOString().split("T")[0], 0);
     }
 
-    const feedbackItems = theme.feedbackThemes.map((ft) => ({
-      id: ft.feedback.id,
-      content: ft.feedback.content,
-      channel: ft.feedback.channel,
-      sentiment: ft.feedback.sentiment,
-      status: ft.feedback.status,
-      customerLabel: ft.feedback.customerLabel,
-      createdAt: ft.feedback.createdAt,
-      confidence: ft.confidence,
-    }));
-
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    const timelineByDate: Record<string, number> = {};
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split("T")[0];
-      timelineByDate[dateStr] = 0;
-    }
-
-    theme.feedbackThemes.forEach((ft) => {
-      const dateStr = new Date(ft.feedback.createdAt).toISOString().split("T")[0];
-      if (timelineByDate[dateStr] !== undefined) {
-        timelineByDate[dateStr] += 1;
+    linkedFeedbacks.forEach((f) => {
+      if (f.createdAt >= startDate) {
+        const dStr = f.createdAt.toISOString().split("T")[0];
+        if (timelineMap.has(dStr)) {
+          timelineMap.set(dStr, (timelineMap.get(dStr) || 0) + 1);
+        }
       }
     });
 
-    const timelineData = Object.entries(timelineByDate).map(([date, count]) => ({
+    const timeline = Array.from(timelineMap.entries()).map(([date, count]) => ({
       date,
       count,
     }));
@@ -74,51 +68,14 @@ export async function GET(
         id: theme.id,
         name: theme.name,
         description: theme.description,
-        color: theme.color,
-        totalCount: feedbackItems.length,
+        color: theme.color || "#0284c7",
+        totalCount: linkedFeedbacks.length,
       },
-      feedback: feedbackItems,
-      timeline: timelineData,
+      feedback: linkedFeedbacks,
+      timeline,
     });
   } catch (error: any) {
-    console.error("Get theme error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
-
-export async function DELETE(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  try {
-    const session = await auth();
-
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if ((session.user as any).role !== "ADMIN") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const { id } = await context.params;
-    const workspaceId = (session.user as any).workspaceId;
-
-    const theme = await prisma.theme.findUnique({
-      where: { id },
-    });
-
-    if (!theme || theme.workspaceId !== workspaceId) {
-      return NextResponse.json({ error: "Theme not found" }, { status: 404 });
-    }
-
-    await prisma.theme.delete({
-      where: { id },
-    });
-
-    return NextResponse.json({ message: "Theme deleted" });
-  } catch (error: any) {
-    console.error("Delete theme error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("Theme Detail Error:", error);
+    return NextResponse.json({ error: error?.message || "Failed to load theme details" }, { status: 500 });
   }
 }

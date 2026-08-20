@@ -1,185 +1,127 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { z } from "zod";
-import { classifyFeedbackWithRetry } from "@/lib/ai";
-import { generateEmbedding } from "@/lib/embeddings";
+import prisma from "@/lib/prisma";
 
-const createFeedbackSchema = z.object({
-  content: z.string().min(5, "Feedback must be at least 5 characters"),
-  channel: z.string().min(1, "Channel is required"),
-  customerLabel: z.string().optional(),
-});
-
-export async function POST(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const session = await auth();
-
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userRole = (session.user as any).role;
-    const workspaceId = (session.user as any).workspaceId;
-
-    if (!["ADMIN", "ANALYST"].includes(userRole)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const body = await request.json();
-    const validation = createFeedbackSchema.safeParse(body);
-
-    if (!validation.success) {
-      return NextResponse.json(
-        { error: "Validation failed", details: validation.error.issues },
-        { status: 400 }
-      );
-    }
-
-    const { content, channel, customerLabel } = validation.data;
-
-    let feedback = await prisma.feedback.create({
-      data: {
-        content,
-        channel,
-        customerLabel: customerLabel || "Anonymous",
-        workspaceId,
-        status: "NEW",
-        sentiment: "NEU",
-        sentimentScore: 0,
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: session.user.id || "" },
+          { email: session.user.email || "" },
+        ],
       },
+      select: { workspaceId: true },
     });
 
-    // 1. Auto-classify with Claude AI
-    try {
-      const existingThemes = await prisma.theme.findMany({
-        where: { workspaceId },
-        select: { name: true },
-      });
-      const existingThemeNames = existingThemes.map((t) => t.name);
+    if (!user?.workspaceId) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    }
 
-      const classification = await classifyFeedbackWithRetry(
-        content,
-        existingThemeNames
-      );
+    const { searchParams } = new URL(req.url);
+    const search = searchParams.get("search") || "";
+    const channel = searchParams.get("channel") || "";
+    const sentiment = searchParams.get("sentiment") || "";
+    const status = searchParams.get("status") || "";
 
-      if (classification) {
-        feedback = await prisma.feedback.update({
-          where: { id: feedback.id },
-          data: {
-            sentiment: classification.sentiment,
-            sentimentScore: classification.sentimentScore,
+    const whereClause: any = {
+      workspaceId: user.workspaceId,
+    };
+
+    if (search) {
+      whereClause.content = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    if (channel && channel !== "All Channels") {
+      whereClause.channel = channel;
+    }
+
+    if (sentiment && sentiment !== "All Sentiments") {
+      whereClause.sentiment = sentiment;
+    }
+
+    if (status && status !== "All Statuses") {
+      whereClause.status = status;
+    }
+
+    const feedbacks = await prisma.feedback.findMany({
+      where: whereClause,
+      include: {
+        feedbackThemes: {
+          include: {
+            theme: true,
           },
-        });
-
-        for (const themeName of classification.themes) {
-          let theme = await prisma.theme.findFirst({
-            where: { workspaceId, name: themeName },
-          });
-
-          if (!theme) {
-            theme = await prisma.theme.create({
-              data: {
-                name: themeName,
-                description: `Auto-generated theme: ${classification.featureArea}`,
-                workspaceId,
-              },
-            });
-          }
-
-          await prisma.feedbackTheme.create({
-            data: {
-              feedbackId: feedback.id,
-              themeId: theme.id,
-              confidence: 0.9,
-            },
-          });
-        }
-      }
-    } catch (classifyError) {
-      console.error("Background AI classification failed:", classifyError);
-    }
-
-    // 2. Generate Semantic Vector Embedding
-    try {
-      const embedding = await generateEmbedding(content);
-
-      await prisma.embedding.create({
-        data: {
-          feedbackId: feedback.id,
-          vector: JSON.stringify(embedding),
         },
-      });
-    } catch (embeddingError) {
-      console.error("Embedding generation failed:", embeddingError);
-    }
+      },
+      orderBy: { createdAt: "desc" },
+    });
 
-    return NextResponse.json(
-      { message: "Feedback created successfully", feedback },
-      { status: 201 }
-    );
+    return NextResponse.json({
+      feedbacks,
+      total: feedbacks.length,
+    });
   } catch (error: any) {
-    console.error("Create feedback error:", error);
+    console.error("Feedback API Error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: error?.message || "Failed to fetch feedback" },
       { status: 500 }
     );
   }
 }
 
-export async function GET(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
     const session = await auth();
-
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const workspaceId = (session.user as any).workspaceId;
-    const url = new URL(request.url);
-    const page = parseInt(url.searchParams.get("page") || "1");
-    const limit = parseInt(url.searchParams.get("limit") || "10");
-    const channel = url.searchParams.get("channel");
-    const sentiment = url.searchParams.get("sentiment");
-    const status = url.searchParams.get("status");
-    const search = url.searchParams.get("search");
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: session.user.id || "" },
+          { email: session.user.email || "" },
+        ],
+      },
+      select: { workspaceId: true },
+    });
 
-    const where: any = { workspaceId };
-
-    if (channel) where.channel = channel;
-    if (sentiment) where.sentiment = sentiment;
-    if (status) where.status = status;
-    if (search) {
-      where.content = { contains: search, mode: "insensitive" };
+    if (!user?.workspaceId) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
 
-    const total = await prisma.feedback.count({ where });
+    const body = await req.json();
+    const { content, channel = "Manual Intake", sentiment = "NEU", customerLabel = "Direct User" } = body;
 
-    const feedback = await prisma.feedback.findMany({
-      where,
-      include: {
-        feedbackThemes: {
-          include: { theme: true },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    if (!content) {
+      return NextResponse.json({ error: "Content is required" }, { status: 400 });
+    }
 
-    return NextResponse.json({
-      feedback,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+    const newFeedback = await prisma.feedback.create({
+      data: {
+        content,
+        channel,
+        customerLabel,
+        sentiment,
+        sentimentScore: sentiment === "POS" ? 0.8 : sentiment === "NEG" ? -0.8 : 0.0,
+        status: "NEW",
+        workspaceId: user.workspaceId,
       },
     });
+
+    return NextResponse.json({ success: true, feedback: newFeedback });
   } catch (error: any) {
-    console.error("List feedback error:", error);
+    console.error("Create Feedback Error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: error?.message || "Failed to create feedback" },
       { status: 500 }
     );
   }

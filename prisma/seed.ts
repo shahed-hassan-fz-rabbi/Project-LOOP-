@@ -1,10 +1,8 @@
 import { PrismaClient, UserRole, Sentiment, FeedbackStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { generateEmbedding } from "../lib/embeddings";
 
 const prisma = new PrismaClient();
 
-// Realistic feedback data
 const feedbackSamples = [
   // Onboarding
   { content: "Onboarding flow is confusing. Took 30 minutes to invite my first team member.", channel: "Support Ticket", sentiment: Sentiment.NEG, topic: "Onboarding" },
@@ -92,9 +90,8 @@ const feedbackSamples = [
 ];
 
 async function main() {
-  console.log("🌱 Starting seed...");
+  console.log("🌱 Starting clean seed...");
 
-  // Clean up existing data
   await prisma.feedbackTheme.deleteMany({});
   await prisma.embedding.deleteMany({});
   await prisma.feedback.deleteMany({});
@@ -103,47 +100,22 @@ async function main() {
   await prisma.user.deleteMany({});
   await prisma.workspace.deleteMany({});
 
-  console.log("✓ Cleaned up existing data");
-
-  // Create workspace
   const workspace = await prisma.workspace.create({
-    data: {
-      name: "Demo Company",
-    },
+    data: { name: "Demo Company" },
   });
 
-  console.log(`✓ Created workspace: ${workspace.name}`);
+  const adminPass = await bcrypt.hash("admin123", 10);
+  const analystPass = await bcrypt.hash("analyst123", 10);
+  const viewerPass = await bcrypt.hash("viewer123", 10);
 
-  // Create users
   await prisma.user.createMany({
     data: [
-      {
-        name: "Admin User",
-        email: "admin@demo.com",
-        passwordHash: await bcrypt.hash("admin123", 10),
-        role: UserRole.ADMIN,
-        workspaceId: workspace.id,
-      },
-      {
-        name: "Analyst User",
-        email: "analyst@demo.com",
-        passwordHash: await bcrypt.hash("analyst123", 10),
-        role: UserRole.ANALYST,
-        workspaceId: workspace.id,
-      },
-      {
-        name: "Viewer User",
-        email: "viewer@demo.com",
-        passwordHash: await bcrypt.hash("viewer123", 10),
-        role: UserRole.VIEWER,
-        workspaceId: workspace.id,
-      },
+      { name: "Admin User", email: "admin@demo.com", passwordHash: adminPass, role: UserRole.ADMIN, workspaceId: workspace.id },
+      { name: "Analyst User", email: "analyst@demo.com", passwordHash: analystPass, role: UserRole.ANALYST, workspaceId: workspace.id },
+      { name: "Viewer User", email: "viewer@demo.com", passwordHash: viewerPass, role: UserRole.VIEWER, workspaceId: workspace.id },
     ],
   });
 
-  console.log("✓ Created 3 users (Admin, Analyst, Viewer)");
-
-  // Create themes
   const themeNames = [
     { name: "Onboarding", description: "Issues and feedback related to user onboarding experience", color: "#f97316" },
     { name: "Performance", description: "Speed, latency, and load time complaints", color: "#ef4444" },
@@ -158,88 +130,66 @@ async function main() {
   ];
 
   const themes = await Promise.all(
-    themeNames.map((theme) =>
-      prisma.theme.create({
-        data: {
-          ...theme,
-          workspaceId: workspace.id,
-        },
-      })
-    )
+    themeNames.map((t) => prisma.theme.create({ data: { ...t, workspaceId: workspace.id } }))
   );
 
-  console.log(`✓ Created ${themes.length} themes`);
+  const MULTIPLIER = 3;
+  let customerIndex = 1;
+  let totalInserted = 0;
 
-  // Create feedback with smart theme assignment
-  const createdFeedback = [];
-  for (let i = 0; i < feedbackSamples.length; i++) {
-    const sample = feedbackSamples[i];
+  for (let round = 0; round < MULTIPLIER; round++) {
+    for (let i = 0; i < feedbackSamples.length; i++) {
+      const sample = feedbackSamples[i];
 
-    const daysAgo = Math.floor(Math.random() * 60);
-    const createdAt = new Date();
-    createdAt.setDate(createdAt.getDate() - daysAgo);
+      const daysAgo = Math.floor(Math.random() * 30);
+      const createdAt = new Date();
+      createdAt.setDate(createdAt.getDate() - daysAgo);
 
-    const feedback = await prisma.feedback.create({
-      data: {
-        content: sample.content,
-        channel: sample.channel,
-        customerLabel: `Customer ${i + 1}`,
-        sentiment: sample.sentiment,
-        sentimentScore:
-          sample.sentiment === Sentiment.POS
-            ? 0.7 + Math.random() * 0.3
-            : sample.sentiment === Sentiment.NEG
-            ? -0.7 - Math.random() * 0.3
-            : Math.random() * 0.4 - 0.2,
-        status: [FeedbackStatus.NEW, FeedbackStatus.REVIEWED, FeedbackStatus.ACTIONED][
-          Math.floor(Math.random() * 3)
-        ],
-        workspaceId: workspace.id,
-        createdAt,
-      },
-    });
-
-    const relevantTheme = themes.find((t) =>
-      t.name.toLowerCase().includes(sample.topic.toLowerCase())
-    );
-
-    if (relevantTheme) {
-      await prisma.feedbackTheme.create({
+      const feedback = await prisma.feedback.create({
         data: {
-          feedbackId: feedback.id,
-          themeId: relevantTheme.id,
-          confidence: 0.8 + Math.random() * 0.2,
+          content: sample.content,
+          channel: sample.channel,
+          customerLabel: `Customer ${customerIndex++}`,
+          sentiment: sample.sentiment,
+          sentimentScore:
+            sample.sentiment === Sentiment.POS
+              ? 0.8
+              : sample.sentiment === Sentiment.NEG
+              ? -0.8
+              : 0.1,
+          status: FeedbackStatus.REVIEWED,
+          workspaceId: workspace.id,
+          createdAt,
         },
       });
-    }
 
-    createdFeedback.push(feedback);
-  }
+      const relevantTheme = themes.find((t) =>
+        t.name.toLowerCase().includes(sample.topic.toLowerCase())
+      );
 
-  console.log(`✓ Created ${createdFeedback.length} realistic feedback items`);
+      if (relevantTheme) {
+        await prisma.feedbackTheme.create({
+          data: {
+            feedbackId: feedback.id,
+            themeId: relevantTheme.id,
+            confidence: 0.95,
+          },
+        });
+      }
 
-  // Generate vector embeddings for all seeded feedback
-  console.log("\n📊 Generating embeddings for semantic search...");
-  for (const feedback of createdFeedback) {
-    try {
-      const embedding = await generateEmbedding(feedback.content);
+      // Fast mock vector embedding to avoid API rate limits
       await prisma.embedding.create({
         data: {
           feedbackId: feedback.id,
-          vector: JSON.stringify(embedding),
+          vector: JSON.stringify(Array.from({ length: 384 }, () => Math.random() * 0.1)),
         },
       });
-    } catch (err) {
-      console.error(`Failed to embed feedback ID ${feedback.id}`);
+
+      totalInserted++;
     }
   }
 
-  console.log("✓ Embeddings generated successfully!");
-  console.log("\n✅ Seed completed successfully!");
-  console.log("\n📋 Demo Credentials:");
-  console.log("   Admin:   admin@demo.com / admin123");
-  console.log("   Analyst: analyst@demo.com / analyst123");
-  console.log("   Viewer:  viewer@demo.com / viewer123");
+  console.log(`✅ Seed successfully inserted ${totalInserted} feedbacks!`);
 }
 
 main()
