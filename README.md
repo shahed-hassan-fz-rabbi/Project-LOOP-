@@ -1,4 +1,4 @@
-# LOOP — AI Customer-Feedback Intelligence Platform
+# LOOP AI Customer-Feedback Intelligence Platform
 
 > **Enterprise-Grade Voice-of-Customer (VoC) & Feedback Analytics Engine**  
 > *Transforming unstructured omnichannel feedback into ranked, evidence-backed product decisions through deterministic multi-tenant isolation and grounded Retrieval-Augmented Generation (RAG).*
@@ -256,9 +256,7 @@ model Report {
 
 ## 📦 Submission Deliverables
 
-* **Live Application URL:** [https://loop-intelligence.vercel.app](https://loop-intelligence.vercel.app)
-* **Demo Walkthrough Video (3–5 min):** Available upon request
-* **Self-Feedback Video (1–2 min):** Available upon request
+* **Live Application URL:** https://project-loop-eta.vercel.app/
 * **GitHub Repository:** https://github.com/shahed-hassan-fz-rabbi/Loop-Feedback-Analysis
 
 ---
